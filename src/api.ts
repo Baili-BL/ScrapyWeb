@@ -319,6 +319,59 @@ export function adminDeleteUser(id: string): Promise<AuthUser> {
   return request<AuthUser>(`/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
+/* ------------------------- AI 配置与对话 ------------------------- */
+
+export type AiProvider = 'deepseek' | 'openai' | 'moonshot' | 'qwen' | 'custom'
+
+export type AiConfigView = {
+  provider: AiProvider
+  providerLabel: string
+  baseUrl: string
+  model: string
+  temperature: number
+  enabled: boolean
+  hasKey: boolean
+  apiKeyMasked: string
+  updatedAt: string
+}
+
+export type AiSavePayload = {
+  provider: AiProvider
+  baseUrl: string
+  model: string
+  apiKey?: string
+  temperature?: number
+  enabled?: boolean
+}
+
+export type AiCallResult = { ok: boolean; reply: string; latencyMs: number; message: string }
+
+export type AiChatMessage = { role: 'user' | 'assistant' | 'system'; content: string }
+
+export const AI_PROVIDER_PRESETS: Record<AiProvider, { label: string; baseUrl: string; models: string[] }> = {
+  deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
+  openai: { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'] },
+  moonshot: { label: 'Moonshot AI（Kimi）', baseUrl: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'kimi-k2-0711-preview'] },
+  qwen: { label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-turbo', 'qwen-max'] },
+  custom: { label: '自定义（OpenAI 兼容）', baseUrl: '', models: [] },
+}
+
+export function fetchAiConfig(): Promise<AiConfigView> {
+  return request<AiConfigView>('/api/ai/config')
+}
+
+export function saveAiConfig(payload: AiSavePayload): Promise<AiConfigView> {
+  return request<AiConfigView>('/api/ai/config', { method: 'PUT', body: JSON.stringify(payload) })
+}
+
+export function testAi(): Promise<AiCallResult> {
+  return request<AiCallResult>('/api/ai/test', { method: 'POST' })
+}
+
+export function chatAi(messages: AiChatMessage[]): Promise<{ reply: string; latencyMs: number }> {
+  return request<{ reply: string; latencyMs: number }>('/api/ai/chat', { method: 'POST', body: JSON.stringify({ messages }) })
+}
+
 export type TaskDraftPayload = {
   name: string
   description: string

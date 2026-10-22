@@ -2,6 +2,8 @@ import { Button, Form, Input, Switch, Table, Tag } from '@arco-design/web-react'
 import type { ColumnProps } from '@arco-design/web-react/es/Table'
 import { useState } from 'react'
 import { NODE } from '../data.ts'
+import { AiAssistant } from '../ai/AiAssistant.tsx'
+import { AiConfigPage } from '../ai/AiConfigPage.tsx'
 import { BotConfig } from '../bots/BotConfig.tsx'
 import { LogList } from '../logs/LogList.tsx'
 import { UserAdmin } from '../users/UserAdmin.tsx'
@@ -55,8 +57,6 @@ export function ModulePage({
   menuKey: MenuKey
   onSaved: (text: string) => void
 }) {
-  const [model, setModel] = useState('deepseek-chat')
-  const [endpoint, setEndpoint] = useState('https://api.example.com/v1')
   const [siteName, setSiteName] = useState('监控仪表盘')
   const [alertOn, setAlertOn] = useState(true)
 
@@ -108,55 +108,11 @@ export function ModulePage({
   }
 
   if (menuKey === 'ai-assistant') {
-    return (
-      <div className="page">
-        <div className="page-inner">
-          <header className="page-header">
-            <div className="brand-text">
-              <h1>AI助手</h1>
-              <p>只读账号可查看助手入口，不能发起执行</p>
-            </div>
-          </header>
-          <section className="panel ai-panel">
-            <p className="ai-hint">可以询问任务失败原因、调度峰值和节点负载。当前账号为 readonly。</p>
-            <Input.TextArea placeholder="输入想了解的监控问题" autoSize={{ minRows: 4, maxRows: 6 }} />
-            <div className="ai-actions">
-              <Button type="primary" onClick={() => onSaved('只读账号无法发送消息')}>
-                发送
-              </Button>
-            </div>
-          </section>
-        </div>
-      </div>
-    )
+    return <AiAssistant onNotify={onSaved} />
   }
 
   if (menuKey === 'ai-config') {
-    return (
-      <div className="page">
-        <div className="page-inner">
-          <header className="page-header">
-            <div className="brand-text">
-              <h1>AI配置</h1>
-              <p>模型接口与访问地址</p>
-            </div>
-          </header>
-          <section className="panel form-panel">
-            <Form layout="vertical">
-              <Form.Item label="模型">
-                <Input value={model} onChange={setModel} />
-              </Form.Item>
-              <Form.Item label="接口地址">
-                <Input value={endpoint} onChange={setEndpoint} />
-              </Form.Item>
-              <Button type="primary" onClick={() => onSaved('AI 配置已保存')}>
-                保存
-              </Button>
-            </Form>
-          </section>
-        </div>
-      </div>
-    )
+    return <AiConfigPage onNotify={onSaved} />
   }
 
   if (menuKey === 'ai-bot') {

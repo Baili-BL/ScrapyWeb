@@ -815,6 +815,96 @@ function validateNewUser(username: string, password: string): string | null {
   return null
 }
 
+/* ------------------------- AI 配置与调用 ------------------------- */
+
+const AI_CONFIG_FILE = path.join(DATA, 'ai-config.json')
+
+type AiProvider = 'deepseek' | 'openai' | 'moonshot' | 'qwen' | 'custom'
+
+type AiConfigRecord = {
+  provider: AiProvider
+  baseUrl: string
+  model: string
+  apiKey: string
+  temperature: number
+  enabled: boolean
+  updatedAt: string
+}
+
+const AI_PROVIDERS: Record<AiProvider, { label: string; baseUrl: string; models: string[] }> = {
+  deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
+  openai: { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'] },
+  moonshot: { label: 'Moonshot AI（Kimi）', baseUrl: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'kimi-k2-0711-preview'] },
+  qwen: { label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-turbo', 'qwen-max'] },
+  custom: { label: '自定义（OpenAI 兼容）', baseUrl: '', models: [] },
+}
+
+function loadAiConfig(): AiConfigRecord {
+  const saved = loadJson<Partial<AiConfigRecord>>(AI_CONFIG_FILE, {})
+  return {
+    provider: saved.provider ?? 'deepseek',
+    baseUrl: saved.baseUrl ?? AI_PROVIDERS[saved.provider ?? 'deepseek']?.baseUrl ?? AI_PROVIDERS.deepseek.baseUrl,
+    model: saved.model ?? 'deepseek-chat',
+    apiKey: saved.apiKey ?? '',
+    temperature: typeof saved.temperature === 'number' ? saved.temperature : 0.3,
+    enabled: saved.enabled ?? false,
+    updatedAt: saved.updatedAt ?? '',
+  }
+}
+
+function maskApiKey(key: string): string {
+  if (!key) return ''
+  return key.length <= 8 ? '****' : `${key.slice(0, 4)}****${key.slice(-4)}`
+}
+
+function aiConfigView(config: AiConfigRecord) {
+  return {
+    provider: config.provider,
+    providerLabel: AI_PROVIDERS[config.provider]?.label ?? config.provider,
+    baseUrl: config.baseUrl,
+    model: config.model,
+    temperature: config.temperature,
+    enabled: config.enabled,
+    hasKey: Boolean(config.apiKey),
+    apiKeyMasked: maskApiKey(config.apiKey),
+    updatedAt: config.updatedAt,
+  }
+}
+
+async function callAiChat(
+  config: AiConfigRecord,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number,
+): Promise<{ ok: boolean; reply: string; latencyMs: number; message: string }> {
+  if (!config.apiKey) return { ok: false, reply: '', latencyMs: 0, message: '未配置 API Key' }
+  if (!config.baseUrl || !config.model) return { ok: false, reply: '', latencyMs: 0, message: '接口地址或模型未配置' }
+  const started = Date.now()
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 45000)
+  try {
+    const response = await fetch(`${config.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
+      body: JSON.stringify({ model: config.model, messages, temperature: config.temperature, max_tokens: maxTokens }),
+      signal: controller.signal,
+    })
+    const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null
+    if (!response.ok) {
+      const detail =
+        (payload?.error as { message?: string } | undefined)?.message ?? `HTTP ${response.status}`
+      return { ok: false, reply: '', latencyMs: Date.now() - started, message: detail }
+    }
+    const choices = payload?.choices as Array<{ message?: { content?: string } }> | undefined
+    const reply = choices?.[0]?.message?.content ?? ''
+    return { ok: true, reply, latencyMs: Date.now() - started, message: '' }
+  } catch (error) {
+    const aborted = error instanceof Error && error.name === 'AbortError'
+    return { ok: false, reply: '', latencyMs: Date.now() - started, message: aborted ? '请求超时（45s）' : String(error) }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /* ------------------------- HTTP 工具 ------------------------- */
 
 function sendJson(res: import('node:http').ServerResponse, status: number, payload: unknown): void {
@@ -1131,6 +1221,67 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
         return true
       }
     }
+    return true
+  }
+
+  /* ------------------------- AI 配置与对话 ------------------------- */
+
+  if (pathname === '/api/ai/config' && method === 'GET') {
+    sendJson(res, 200, aiConfigView(loadAiConfig()))
+    return true
+  }
+
+  if (pathname === '/api/ai/config' && method === 'PUT') {
+    const body = await readBody(req)
+    const current = loadAiConfig()
+    const provider = String(body.provider ?? current.provider) as AiProvider
+    if (!AI_PROVIDERS[provider]) {
+      sendJson(res, 400, { error: '不支持的模型供应商' })
+      return true
+    }
+    const baseUrl = String(body.baseUrl ?? '').trim() || AI_PROVIDERS[provider].baseUrl
+    const model = String(body.model ?? '').trim()
+    if (!model) {
+      sendJson(res, 400, { error: '请选择或填写模型' })
+      return true
+    }
+    const apiKey = typeof body.apiKey === 'string' && body.apiKey.trim() ? body.apiKey.trim() : current.apiKey
+    const enabled = typeof body.enabled === 'boolean' ? body.enabled : current.enabled
+    const temperature = typeof body.temperature === 'number' ? Math.min(2, Math.max(0, body.temperature)) : current.temperature
+    const next: AiConfigRecord = { provider, baseUrl, model, apiKey, temperature, enabled, updatedAt: new Date().toISOString() }
+    saveJson(AI_CONFIG_FILE, next)
+    sendJson(res, 200, aiConfigView(next))
+    return true
+  }
+
+  if (pathname === '/api/ai/test' && method === 'POST') {
+    const result = await callAiChat(loadAiConfig(), [{ role: 'user', content: '请只回复四个字：连接成功' }], 32)
+    sendJson(res, 200, result)
+    return true
+  }
+
+  if (pathname === '/api/ai/chat' && method === 'POST') {
+    const config = loadAiConfig()
+    if (!config.enabled || !config.apiKey) {
+      sendJson(res, 400, { error: '请先在「AI 配置」中选择模型并填写 API Key，然后启用' })
+      return true
+    }
+    const body = await readBody(req)
+    const history = Array.isArray(body.messages) ? (body.messages as Array<{ role: string; content: string }>) : []
+    if (!history.length) {
+      sendJson(res, 400, { error: '消息为空' })
+      return true
+    }
+    const withSystem = [
+      { role: 'system', content: '你是 ScrapyWeb 爬虫监控平台的 AI 助手，帮助用户排查任务失败原因、解读运行数据。回答保持简洁、使用中文。' },
+      ...history.slice(-20),
+    ]
+    const result = await callAiChat(config, withSystem, 1024)
+    if (!result.ok) {
+      sendJson(res, 502, { error: result.message })
+      return true
+    }
+    sendJson(res, 200, { reply: result.reply, latencyMs: result.latencyMs })
     return true
   }
 
