@@ -2379,6 +2379,27 @@ span.project-file {
   overflow: auto;
 }
 
+.remote-title {
+  margin: 20px 0 10px;
+  font-size: 14px;
+  color: rgb(78, 89, 105);
+}
+
+.local-node-card {
+  margin-bottom: 6px;
+}
+
+.local-node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.local-node-head strong {
+  font-size: 15px;
+}
+
 .env-table {
   width: 100%;
   border-collapse: collapse;

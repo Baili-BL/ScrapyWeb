@@ -905,6 +905,80 @@ async function callAiChat(
   }
 }
 
+/* ------------------------- 分布式节点 ------------------------- */
+
+const NODES_FILE = path.join(DATA, 'nodes.json')
+
+type RemoteNodeRecord = {
+  id: string
+  name: string
+  host: string
+  description: string
+  addedAt: string
+  lastProbeAt: string | null
+  lastStatus: 'unknown' | 'connected' | 'disconnected'
+}
+
+function loadRemoteNodes(): RemoteNodeRecord[] {
+  return loadJson<RemoteNodeRecord[]>(NODES_FILE, [])
+}
+
+function saveRemoteNodes(nodes: RemoteNodeRecord[]): void {
+  saveJson(NODES_FILE, nodes)
+}
+
+function primaryIPv4(): string {
+  const interfaces = os.networkInterfaces()
+  for (const list of Object.values(interfaces)) {
+    for (const item of list ?? []) {
+      if (item.family === 'IPv4' && !item.internal) return item.address
+    }
+  }
+  return '127.0.0.1'
+}
+
+/** 真实探活：请求远程节点的 /api/health（3 秒超时）。 */
+async function probeNodeHealth(host: string): Promise<boolean> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 3000)
+  try {
+    const response = await fetch(`http://${host}/api/health`, { signal: controller.signal })
+    return response.ok
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function buildNodesPayload() {
+  const metrics = await buildMetrics()
+  const versions = await detectVersions()
+  const local = {
+    id: 'node-local',
+    name: os.hostname(),
+    role: '主控节点',
+    host: primaryIPv4(),
+    status: 'online' as const,
+    os: `${os.type()} ${os.release()}`,
+    arch: os.arch(),
+    cpuModel: os.cpus()[0]?.model ?? '未知',
+    cores: os.cpus().length,
+    totalMemGb: metrics.memory.totalGb,
+    python: versions.python,
+    scrapy: versions.scrapy,
+    uptimeSec: metrics.uptimeSec,
+    heartbeat: metrics.ts,
+    runningSpiders: [...running.keys()],
+    metrics: { cpu: metrics.cpu, memory: metrics.memory, disk: metrics.disk },
+  }
+  return {
+    local,
+    remote: loadRemoteNodes(),
+    generatedAt: new Date().toISOString(),
+  }
+}
+
 /* ------------------------- HTTP 工具 ------------------------- */
 
 function sendJson(res: import('node:http').ServerResponse, status: number, payload: unknown): void {
@@ -1282,6 +1356,85 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
       return true
     }
     sendJson(res, 200, { reply: result.reply, latencyMs: result.latencyMs })
+    return true
+  }
+
+  /* ------------------------- 分布式节点 ------------------------- */
+
+  if (pathname === '/api/nodes' && method === 'GET') {
+    sendJson(res, 200, await buildNodesPayload())
+    return true
+  }
+
+  if (pathname === '/api/nodes' && method === 'POST') {
+    const body = await readBody(req)
+    const name = String(body.name ?? '').trim()
+    const host = String(body.host ?? '').trim()
+    if (!name || !host) {
+      sendJson(res, 400, { error: '节点名称与地址不能为空' })
+      return true
+    }
+    const nodes = loadRemoteNodes()
+    if (nodes.some((node) => node.name === name || node.host === host)) {
+      sendJson(res, 400, { error: '已存在同名或同地址的节点' })
+      return true
+    }
+    const record: RemoteNodeRecord = {
+      id: `node-${crypto.randomBytes(4).toString('hex')}`,
+      name,
+      host,
+      description: String(body.description ?? '').trim(),
+      addedAt: new Date().toISOString(),
+      lastProbeAt: null,
+      lastStatus: 'unknown',
+    }
+    nodes.push(record)
+    saveRemoteNodes(nodes)
+    sendJson(res, 200, record)
+    return true
+  }
+
+  const remoteNodeMatch = /^\/api\/nodes\/([^/]+)$/.exec(pathname)
+  if (remoteNodeMatch) {
+    const id = decodeURIComponent(remoteNodeMatch[1])
+    const nodes = loadRemoteNodes()
+    const index = nodes.findIndex((node) => node.id === id)
+    if (index === -1) {
+      sendJson(res, 404, { error: '节点不存在' })
+      return true
+    }
+    if (method === 'PUT') {
+      const body = await readBody(req)
+      const node = nodes[index]
+      if (typeof body.name === 'string' && body.name.trim()) node.name = body.name.trim()
+      if (typeof body.host === 'string' && body.host.trim()) node.host = body.host.trim()
+      if (typeof body.description === 'string') node.description = body.description
+      saveRemoteNodes(nodes)
+      sendJson(res, 200, node)
+      return true
+    }
+    if (method === 'DELETE') {
+      const [removed] = nodes.splice(index, 1)
+      saveRemoteNodes(nodes)
+      sendJson(res, 200, removed)
+      return true
+    }
+  }
+
+  const nodeProbeMatch = /^\/api\/nodes\/([^/]+)\/probe$/.exec(pathname)
+  if (nodeProbeMatch && method === 'POST') {
+    const id = decodeURIComponent(nodeProbeMatch[1])
+    const nodes = loadRemoteNodes()
+    const node = nodes.find((item) => item.id === id)
+    if (!node) {
+      sendJson(res, 404, { error: '节点不存在' })
+      return true
+    }
+    const online = await probeNodeHealth(node.host)
+    node.lastProbeAt = new Date().toISOString()
+    node.lastStatus = online ? 'connected' : 'disconnected'
+    saveRemoteNodes(nodes)
+    sendJson(res, 200, { status: node.lastStatus, lastProbeAt: node.lastProbeAt })
     return true
   }
 

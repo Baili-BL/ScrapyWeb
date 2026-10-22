@@ -372,6 +372,67 @@ export function chatAi(messages: AiChatMessage[]): Promise<{ reply: string; late
   return request<{ reply: string; latencyMs: number }>('/api/ai/chat', { method: 'POST', body: JSON.stringify({ messages }) })
 }
 
+/* ------------------------- 分布式节点 ------------------------- */
+
+export type LocalNodeInfo = {
+  id: string
+  name: string
+  role: string
+  host: string
+  status: 'online'
+  os: string
+  arch: string
+  cpuModel: string
+  cores: number
+  totalMemGb: number
+  python: string
+  scrapy: string
+  uptimeSec: number
+  heartbeat: string
+  runningSpiders: string[]
+  metrics: Metrics
+}
+
+export type RemoteNodeItem = {
+  id: string
+  name: string
+  host: string
+  description: string
+  addedAt: string
+  lastProbeAt: string | null
+  lastStatus: 'unknown' | 'connected' | 'disconnected'
+}
+
+export type NodesPayload = {
+  local: LocalNodeInfo
+  remote: RemoteNodeItem[]
+  generatedAt: string
+}
+
+export type RemoteNodeDraft = { name: string; host: string; description: string }
+
+export function fetchNodes(): Promise<NodesPayload> {
+  return request<NodesPayload>('/api/nodes')
+}
+
+export function createRemoteNode(payload: RemoteNodeDraft): Promise<RemoteNodeItem> {
+  return request<RemoteNodeItem>('/api/nodes', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function updateRemoteNode(id: string, patch: Partial<RemoteNodeDraft>): Promise<RemoteNodeItem> {
+  return request<RemoteNodeItem>(`/api/nodes/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) })
+}
+
+export function deleteRemoteNode(id: string): Promise<RemoteNodeItem> {
+  return request<RemoteNodeItem>(`/api/nodes/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function probeRemoteNode(id: string): Promise<{ status: RemoteNodeItem['lastStatus']; lastProbeAt: string }> {
+  return request<{ status: RemoteNodeItem['lastStatus']; lastProbeAt: string }>(`/api/nodes/${encodeURIComponent(id)}/probe`, {
+    method: 'POST',
+  })
+}
+
 export type TaskDraftPayload = {
   name: string
   description: string
