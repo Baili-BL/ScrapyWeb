@@ -15,10 +15,8 @@ import {
 import { useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { runFlow, pollFlowRun } from '../api.ts'
-import { nodeSize, orderedScriptNodes, SPIDER_OPTIONS } from './model.ts'
+import { nodeSize, orderedScriptNodes, SPIDER_META, SPIDER_OPTIONS } from './model.ts'
 import type { FlowEdge, FlowNode, FlowNodeType, FlowRecord } from './model.ts'
-
-const ENVS = ['scrapy_env', 'requests_env']
 
 function cloneFlow(flow: FlowRecord): FlowRecord {
   return {
@@ -87,22 +85,24 @@ export function FlowEditor({
     setNodes((list) => list.map((node) => (node.id === id ? { ...node, ...patch } : node)))
   }
 
-  const addScript = () => {
+  const addScript = (spiderName: string) => {
     const count = nodes.filter((node) => node.type === 'script').length + 1
+    const meta = SPIDER_META[spiderName]
     const id = `${flow.id}-script-${Date.now()}`
     const node: FlowNode = {
       id,
       type: 'script',
-      title: `脚本节点 ${count}`,
+      title: meta ? meta.title : `脚本节点 ${count}`,
       x: 360,
       y: 40 + count * 36,
-      project: '',
-      env: '',
-      command: '',
+      project: spiderName,
+      env: meta?.env ?? '',
+      command: meta?.command ?? '',
     }
     setNodes((list) => [...list, node])
     setSelectedId(id)
     setPaletteOpen(false)
+    onNotify(meta ? `已添加「${meta.title}」节点，连接到流程即可` : '已添加脚本节点')
   }
 
   const removeSelected = () => {
@@ -320,22 +320,22 @@ export function FlowEditor({
             <div className="flow-palette">
               {paletteOpen ? (
                 <div className="flow-palette-pop">
-                  <button type="button" onClick={addScript}>
-                    <IconCode />
-                    脚本节点
-                  </button>
+                  {SPIDER_OPTIONS.map((option) => (
+                    <button key={option.value} type="button" onClick={() => addScript(option.value)}>
+                      <IconCode />
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
               ) : null}
               <button type="button" className={paletteOpen ? 'on' : ''} onClick={() => setPaletteOpen((value) => !value)}>
                 节点面板
               </button>
-              <button type="button" aria-label="脚本节点" onClick={addScript}>
-                <IconCode />
-              </button>
-              <button type="button" aria-label="添加脚本节点" onClick={addScript}>
-                <IconPlus />
-              </button>
-              <button type="button" aria-label="编排说明" onClick={() => onNotify('先添加脚本节点，再点右侧圆点接到下一个节点')}>
+              <button
+                type="button"
+                aria-label="编排说明"
+                onClick={() => onNotify('从节点面板选择爬虫节点，再点右侧圆点接到下一个节点')}
+              >
                 <IconQuestionCircle />
               </button>
             </div>
@@ -358,50 +358,50 @@ export function FlowEditor({
           {selected ? (
             <>
               <p>当前节点：{selected.title}</p>
-              <label>
-                <span>节点标题</span>
-                <Input value={selected.title} onChange={(value) => updateNode(selected.id, { title: value })} />
-              </label>
-              <label>
-                <span>节点类型</span>
-                <Input value={selected.type} readOnly />
-              </label>
               {selected.type === 'script' ? (
                 <>
                   <label>
                     <span>项目（爬虫）</span>
                     <Select
-                      placeholder="未配置"
-                      allowClear
+                      placeholder="请选择爬虫"
                       value={selected.project || undefined}
                       options={SPIDER_OPTIONS}
-                      onChange={(value) => updateNode(selected.id, { project: value ? String(value) : '' })}
+                      onChange={(value) => {
+                        const project = value ? String(value) : ''
+                        const meta = project ? SPIDER_META[project] : undefined
+                        updateNode(selected.id, {
+                          project,
+                          env: meta?.env ?? '',
+                          command: meta?.command ?? '',
+                          title: meta ? meta.title : selected.title,
+                        })
+                      }}
                     />
                   </label>
                   <label>
-                    <span>环境</span>
-                    <Select
-                      placeholder="未配置"
-                      allowClear
-                      value={selected.env || undefined}
-                      options={ENVS}
-                      onChange={(value) => updateNode(selected.id, { env: value ? String(value) : '' })}
-                    />
+                    <span>节点标题（随爬虫自动生成）</span>
+                    <Input value={selected.title} readOnly />
                   </label>
                   <label>
-                    <span>备注命令</span>
-                    <Input
-                      value={selected.command}
-                      placeholder="scrapy crawl ..."
-                      onChange={(value) => updateNode(selected.id, { command: value })}
-                    />
+                    <span>环境（自动）</span>
+                    <Input value={selected.env || '—'} readOnly />
                   </label>
-                  <p className="flow-run-hint">运行时将按连线顺序真实执行所选爬虫（scrapy crawl）。</p>
+                  <label>
+                    <span>实际执行命令（自动）</span>
+                    <code className="flow-cmd-code">{selected.command || '请先选择爬虫'}</code>
+                  </label>
                 </>
+              ) : (
+                <label>
+                  <span>节点类型</span>
+                  <Input value={typeName(selected.type)} readOnly />
+                </label>
+              )}
+              {selected.type === 'script' ? (
+                <button type="button" className="flow-delete" onClick={removeSelected}>
+                  删除当前节点
+                </button>
               ) : null}
-              <button type="button" className="flow-delete" onClick={removeSelected}>
-                删除当前节点
-              </button>
             </>
           ) : (
             <p>在画布上选择一个节点。</p>

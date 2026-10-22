@@ -39,7 +39,16 @@ export function blankFlow(id: string, name = '未命名流程'): FlowRecord {
     status: 'draft',
     nodes: [
       { id: `${id}-start`, type: 'start', title: '开始', x: 150, y: 196, project: '', env: '', command: '' },
-      { id: `${id}-script-1`, type: 'script', title: '脚本节点 1', x: 390, y: 168, project: '', env: '', command: '' },
+      {
+        id: `${id}-script-1`,
+        type: 'script',
+        title: '东方财富行情',
+        x: 390,
+        y: 168,
+        project: 'eastmoney_stock',
+        env: 'scrapy_env',
+        command: SPIDER_META.eastmoney_stock.command,
+      },
       { id: `${id}-end`, type: 'end', title: '结束', x: 700, y: 196, project: '', env: '', command: '' },
     ],
     edges: [
@@ -72,3 +81,17 @@ export const SPIDER_OPTIONS = [
   { value: 'eastmoney_stock', label: 'eastmoney_stock（东方财富行情）' },
   { value: 'fcfco_reports', label: 'fcfco_reports（一创研报）' },
 ]
+
+/** 爬虫元数据：选择后自动生成标题/环境/命令，用户无需手输。 */
+export const SPIDER_META: Record<string, { title: string; env: string; command: string }> = {
+  eastmoney_stock: {
+    title: '东方财富行情',
+    env: 'scrapy_env',
+    command: 'scrapy crawl eastmoney_stock -O ../data/eastmoney_600519_kline.json -O ../data/eastmoney_600519_kline.csv',
+  },
+  fcfco_reports: {
+    title: '一创研报',
+    env: 'scrapy_env',
+    command: 'scrapy crawl fcfco_reports -O ../data/fcfco_reports.json',
+  },
+}

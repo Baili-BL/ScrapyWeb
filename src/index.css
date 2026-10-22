@@ -2527,6 +2527,18 @@ span.project-file {
   line-height: 1.5;
 }
 
+.flow-cmd-code {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f7f8fa;
+  color: #4e5969;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
 .flow-screen {
   position: fixed;
   inset: 0;
@@ -2842,6 +2854,10 @@ span.project-file {
   position: absolute;
   left: 8px;
   bottom: 52px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 260px;
   padding: 8px;
   border: 1px solid #e5e6eb;
   border-radius: 10px;
@@ -2850,7 +2866,7 @@ span.project-file {
 }
 
 .flow-palette-pop button {
-  height: 32px;
+  height: 34px;
   padding: 0 10px;
   border: 0;
   border-radius: 6px;
@@ -2858,7 +2874,12 @@ span.project-file {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
   cursor: pointer;
+}
+
+.flow-palette-pop button:hover {
+  background: #e8f3ff;
 }
 
 .flow-minimap {
