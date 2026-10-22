@@ -150,6 +150,18 @@ select {
   justify-content: center;
 }
 
+/* 统一 Arco Tooltip/Dropdown 触发器包裹层：
+   否则包裹层 inline-block 收缩宽度，悬停时布局抖动 */
+.sider .arco-trigger-wrapper {
+  display: block !important;
+  width: 100%;
+}
+
+.sider.collapsed .arco-trigger-wrapper {
+  width: 40px;
+  margin: 0 auto 2px;
+}
+
 .sider.collapsed .nav-text,
 .sider.collapsed .nav-chevron,
 .sider.collapsed .user-meta,
@@ -214,6 +226,7 @@ select {
   text-align: left;
   text-decoration: none;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .nav-item:hover {
@@ -234,6 +247,11 @@ select {
   color: inherit;
   font-size: 16px;
   flex-shrink: 0;
+}
+
+.nav-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .nav-text {
