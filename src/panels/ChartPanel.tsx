@@ -1,24 +1,28 @@
 import { Select, Tabs } from '@arco-design/web-react'
-import { useEffect, useState } from 'react'
-import type { KlineItem } from '../api.ts'
-import { fetchKline } from '../api.ts'
-import { IconBars, IconClock, IconTrend } from '../icons.tsx'
+import { useEffect, useMemo, useState } from 'react'
+import type { Overview, RunRecord } from '../api.ts'
+import { fetchOverview, fetchRuns } from '../api.ts'
+import { IconBars, IconClock, IconList, IconPulse } from '../icons.tsx'
 import { TintStat } from '../ui.tsx'
-import { KlineChart } from './KlineChart.tsx'
+import { bucketRunsByHour, RunHourChart } from './RunHourChart.tsx'
+import { RunCalendar } from './RunCalendar.tsx'
+import { RunGantt } from './RunGantt.tsx'
 import { ReportsPanel } from './ReportsPanel.tsx'
 
 export function ChartPanel({ tick }: { tick: number }) {
-  const [sub, setSub] = useState('trend')
+  const [sub, setSub] = useState('hour')
   const [node, setNode] = useState('local')
-  const [kline, setKline] = useState<KlineItem[] | null>(null)
+  const [runs, setRuns] = useState<RunRecord[] | null>(null)
+  const [overview, setOverview] = useState<Overview | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (sub !== 'trend') return
     let alive = true
-    fetchKline()
-      .then((items) => {
-        if (alive) setKline(items)
+    Promise.all([fetchRuns(undefined, 200), fetchOverview()])
+      .then(([runList, nextOverview]) => {
+        if (!alive) return
+        setRuns(runList)
+        setOverview(nextOverview)
       })
       .catch((err: Error) => {
         if (alive) setError(err.message)
@@ -26,13 +30,14 @@ export function ChartPanel({ tick }: { tick: number }) {
     return () => {
       alive = false
     }
-  }, [sub, tick])
+  }, [tick])
 
-  const latest = kline?.at(-1)
-  const high = kline?.length ? Math.max(...kline.map((item) => item.high ?? 0)) : null
-  const low = kline?.length
-    ? Math.min(...kline.map((item) => item.low ?? Number.POSITIVE_INFINITY))
-    : null
+  const busiestHour = useMemo(() => {
+    if (!runs?.length) return null
+    const buckets = bucketRunsByHour(runs).filter((bucket) => bucket.count > 0)
+    if (!buckets.length) return null
+    return buckets.reduce((top, bucket) => (bucket.count > top.count ? bucket : top))
+  }, [runs])
 
   return (
     <div className="chart-page">
@@ -53,36 +58,52 @@ export function ChartPanel({ tick }: { tick: number }) {
       </div>
 
       <Tabs className="sub-tabs capsule-left" type="capsule" size="small" lazyload animation={false} activeTab={sub} onChange={setSub}>
-        <Tabs.TabPane key="trend" title="股价走势">
+        <Tabs.TabPane key="hour" title="任务小时分布">
           <section className="panel">
             <div className="panel-head">
               <span className="panel-icon tone-orange">
                 <IconClock />
               </span>
               <div className="panel-text">
-                <h2>贵州茅台（600519）收盘价</h2>
-                <p>最近 120 个交易日 · 真实抓取自东方财富</p>
+                <h2>爬虫运行小时分布</h2>
+                <p>按小时统计全部真实运行记录（data/runs.json）</p>
               </div>
             </div>
             <div className="stat-grid">
-              <TintStat tone="blue" icon={<IconTrend />} value={latest ? `¥${Number(latest.close).toFixed(2)}` : '—'} label="最新收盘" />
+              <TintStat tone="blue" icon={<IconList />} value={overview?.stats.runsToday ?? '—'} label="今日运行次数" />
               <TintStat
-                tone={latest && Number(latest.pct_change) >= 0 ? 'green' : 'orange'}
-                icon={<IconTrend />}
-                value={latest ? `${Number(latest.pct_change) > 0 ? '+' : ''}${Number(latest.pct_change).toFixed(2)}%` : '—'}
-                label="当日涨跌幅"
+                tone="green"
+                icon={<IconClock />}
+                value={busiestHour ? busiestHour.label.replace('时', ':00') : '—'}
+                label="最活跃小时"
               />
-              <TintStat tone="purple" icon={<IconClock />} value={high !== null ? `¥${high.toFixed(2)}` : '—'} label="区间最高" />
-              <TintStat tone="orange" icon={<IconBars />} value={low !== null && Number.isFinite(low) ? `¥${low.toFixed(2)}` : '—'} label="区间最低" />
+              <TintStat
+                tone="purple"
+                icon={<IconPulse />}
+                value={busiestHour ? `${busiestHour.count} 次` : '—'}
+                label="该小时运行数"
+              />
+              <TintStat
+                tone="orange"
+                icon={<IconBars />}
+                value={overview?.stats.avgDuration !== null && overview ? `${overview.stats.avgDuration}s` : '—'}
+                label="平均耗时"
+              />
             </div>
             {error ? (
-              <p className="node-line">暂无行情数据：{error}（请先在任务管理运行 eastmoney_stock）</p>
-            ) : kline ? (
-              <KlineChart items={kline} />
-            ) : (
+              <p className="node-line">后端接口不可用：{error}</p>
+            ) : runs === null ? (
               <p className="node-line">加载中…</p>
+            ) : (
+              <RunHourChart runs={runs} />
             )}
           </section>
+        </Tabs.TabPane>
+        <Tabs.TabPane key="calendar" title="任务日历">
+          {runs === null ? <p className="node-line">加载中…</p> : <RunCalendar runs={runs} />}
+        </Tabs.TabPane>
+        <Tabs.TabPane key="gantt" title="运行甘特图">
+          {runs === null ? <p className="node-line">加载中…</p> : <RunGantt runs={runs} />}
         </Tabs.TabPane>
         <Tabs.TabPane key="reports" title="研报数据">
           <ReportsPanel />
