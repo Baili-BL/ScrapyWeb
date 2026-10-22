@@ -21,9 +21,11 @@ import {
   IconThunderbolt,
 } from '@arco-design/web-react/icon'
 import type { ReactNode } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { DEMO_NOW, ENVS, NODE, PROJECTS, recentExecutions } from '../data.ts'
-import { EMPTY_DRAFT, SEED_TASKS, dayKey, describeCron, formatDateTime, nextRunFromCron } from './model.ts'
+import { useEffect, useMemo, useState } from 'react'
+import type { RunRecord, TaskItem } from '../api.ts'
+import { createTask, deleteTask, fetchRuns, fetchTasks, pollRun, runTask as apiRunTask, updateTask } from '../api.ts'
+import { NODE } from '../data.ts'
+import { EMPTY_DRAFT, dayKey, describeCron, formatDateTime, nextRunFromCron } from './model.ts'
 import type { SpiderTask, TaskDraft } from './model.ts'
 
 type ScheduleFilter = 'today' | 'tomorrow' | 'unscheduled' | null
@@ -50,16 +52,19 @@ const INITIAL_FILTERS: TaskFilters = {
   runningOnly: false,
 }
 
-const TODAY = dayKey(DEMO_NOW)
-const TOMORROW_DATE = new Date(DEMO_NOW.getTime())
+const TODAY = dayKey(new Date())
+const TOMORROW_DATE = new Date()
 TOMORROW_DATE.setDate(TOMORROW_DATE.getDate() + 1)
 const TOMORROW = dayKey(TOMORROW_DATE)
 
-let taskSeq = 1
-
-function nextTaskId(): string {
-  taskSeq += 1
-  return `task-${taskSeq}`
+/** 把后端任务记录补上客户端计算的调度信息。 */
+function withDerived(task: TaskItem): SpiderTask {
+  return {
+    ...task,
+    nextRun: task.status === 'active' ? nextRunFromCron(task.cron) : null,
+    lastRun: task.lastRun ? formatDateTime(new Date(task.lastRun)) : null,
+    running: false,
+  }
 }
 
 function statusLabel(status: SpiderTask['status']): string {
@@ -67,7 +72,8 @@ function statusLabel(status: SpiderTask['status']): string {
 }
 
 export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
-  const [tasks, setTasks] = useState<SpiderTask[]>(SEED_TASKS)
+  const [tasks, setTasks] = useState<SpiderTask[]>([])
+  const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState<TaskFilters>(INITIAL_FILTERS)
   const [selected, setSelected] = useState<string[]>([])
   const [editor, setEditor] = useState<'create' | SpiderTask | null>(null)
@@ -76,26 +82,32 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
   const [showNext, setShowNext] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<SpiderTask | null>(null)
   const [historyTask, setHistoryTask] = useState<SpiderTask | null>(null)
-  const [extraRuns, setExtraRuns] = useState<Record<string, string[]>>({})
+  const [historyRuns, setHistoryRuns] = useState<RunRecord[] | null>(null)
   const [tagTask, setTagTask] = useState<SpiderTask | null>(null)
   const [tagDraft, setTagDraft] = useState('')
-  const timers = useRef<number[]>([])
-  const runOffset = useRef(0)
+
+  const loadTasks = async () => {
+    try {
+      const list = await fetchTasks()
+      setTasks(list.map(withDerived))
+    } catch (error) {
+      onNotify(`加载任务失败：${(error as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    const pending = timers.current
-    return () => {
-      pending.forEach((id) => window.clearTimeout(id))
-    }
+    void loadTasks()
   }, [])
 
   const projectOptions = useMemo(() => {
-    const names = new Set<string>([...PROJECTS.map((item) => item.name), ...tasks.map((item) => item.project)])
+    const names = new Set<string>(tasks.map((item) => item.project))
     return [...names]
   }, [tasks])
 
   const envOptions = useMemo(() => {
-    const names = new Set<string>([...ENVS.map((item) => item.name), ...tasks.map((item) => item.env)])
+    const names = new Set<string>(tasks.map((item) => item.env))
     return [...names]
   }, [tasks])
 
@@ -152,7 +164,7 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
     setEditor(task)
   }
 
-  const commitDraft = () => {
+  const commitDraft = async () => {
     const name = draft.name.trim()
     const command = draft.command.trim()
     const cron = draft.cron.trim()
@@ -176,93 +188,110 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
       setFormError('已有同名任务')
       return
     }
-    if (editor === 'create') {
-      const created: SpiderTask = {
-        id: nextTaskId(),
-        name,
-        description: draft.description.trim(),
-        project: draft.project,
-        env: draft.env,
-        node: draft.node,
-        command,
-        cron,
-        concurrent: draft.concurrent,
-        nextRun,
-        lastRun: null,
-        status: 'active',
-        running: false,
-        tags: [],
+    try {
+      if (editor === 'create') {
+        await createTask({
+          name,
+          description: draft.description.trim(),
+          spider: draft.project,
+          project: draft.project,
+          env: draft.env,
+          node: draft.node,
+          command,
+          cron,
+          concurrent: draft.concurrent,
+          tags: [],
+        })
+        onNotify('已创建任务并保存到服务器')
+      } else {
+        await updateTask(editor.id, {
+          name,
+          description: draft.description.trim(),
+          project: draft.project,
+          env: draft.env,
+          node: draft.node,
+          command,
+          cron,
+          concurrent: editor.concurrent,
+        })
+        onNotify('已更新任务配置')
       }
-      setTasks((list) => [created, ...list])
-      onNotify('已创建任务，正在调度...')
-    } else if (editor) {
-      patch(editor.id, (task) => ({
-        ...task,
-        name,
-        description: draft.description.trim(),
-        project: draft.project,
-        env: draft.env,
-        node: draft.node,
-        command,
-        cron,
-        concurrent: task.concurrent,
-        nextRun: task.status === 'active' ? nextRun : null,
-      }))
-      onNotify('已更新任务，正在重新调度...')
+      await loadTasks()
+      setEditor(null)
+    } catch (error) {
+      setFormError((error as Error).message)
     }
-    setEditor(null)
   }
 
-  const toggleStatus = (task: SpiderTask) => {
-    if (task.status === 'active') {
-      patch(task.id, (item) => ({ ...item, status: 'paused', running: false, nextRun: null }))
-      onNotify(`已暂停 ${task.name}`)
-      return
+  const toggleStatus = async (task: SpiderTask) => {
+    const nextStatus = task.status === 'active' ? 'paused' : 'active'
+    try {
+      await updateTask(task.id, { status: nextStatus })
+      onNotify(nextStatus === 'paused' ? `已暂停 ${task.name}` : `已恢复 ${task.name}`)
+      await loadTasks()
+    } catch (error) {
+      onNotify(`操作失败：${(error as Error).message}`)
     }
-    const nextRun = nextRunFromCron(task.cron)
-    patch(task.id, (item) => ({ ...item, status: 'active', nextRun }))
-    onNotify(nextRun ? `已恢复 ${task.name}` : `已恢复 ${task.name}，下次运行未能计算`)
   }
 
-  const runTask = (task: SpiderTask) => {
+  const runTask = async (task: SpiderTask) => {
     if (task.running) return
-    const stamp = formatDateTime(new Date(DEMO_NOW.getTime() + runOffset.current * 1000))
-    runOffset.current += 1
-    patch(task.id, (item) => ({ ...item, running: true, lastRun: stamp }))
-    setExtraRuns((current) => ({ ...current, [task.id]: [stamp, ...(current[task.id] ?? [])] }))
-    onNotify(`已触发 ${task.name}`)
-    const timer = window.setTimeout(() => {
+    patch(task.id, (item) => ({ ...item, running: true }))
+    onNotify(`已触发 ${task.name}，爬虫后台运行中…`)
+    try {
+      const started = await apiRunTask(task.id)
+      const run = started.status === 'running' ? await pollRun(started.id) : started
+      onNotify(
+        run.status === 'success'
+          ? `${task.name} 运行成功：${run.items ?? '?'} 条数据，耗时 ${run.durationSec ?? '?'}s`
+          : `${task.name} 运行失败：${run.message ?? '未知错误'}`,
+      )
+    } catch (error) {
+      onNotify(`${task.name} 运行失败：${(error as Error).message}`)
+    } finally {
       patch(task.id, (item) => ({ ...item, running: false }))
-    }, 8000)
-    timers.current.push(timer)
+      await loadTasks()
+    }
   }
 
-  const duplicate = (task: SpiderTask) => {
+  const duplicate = async (task: SpiderTask) => {
     let name = `${task.name}_copy`
     let index = 2
     while (tasks.some((item) => item.name === name)) {
       name = `${task.name}_copy${index}`
       index += 1
     }
-    const copy: SpiderTask = {
-      ...task,
-      id: nextTaskId(),
-      name,
-      running: false,
-      lastRun: null,
-      nextRun: task.status === 'active' ? nextRunFromCron(task.cron) : null,
-      tags: [...task.tags],
+    try {
+      await createTask({
+        name,
+        description: task.description,
+        spider: task.spider,
+        project: task.project,
+        env: task.env,
+        node: task.node,
+        command: task.command,
+        cron: task.cron,
+        concurrent: task.concurrent,
+        tags: [...task.tags],
+      })
+      onNotify(`已复制为 ${name}`)
+      await loadTasks()
+    } catch (error) {
+      onNotify(`复制失败：${(error as Error).message}`)
     }
-    setTasks((list) => [copy, ...list])
-    onNotify(`已复制为 ${name}`)
   }
 
-  const removeTasks = (ids: string[]) => {
-    setTasks((list) => list.filter((item) => !ids.includes(item.id)))
-    setSelected((list) => list.filter((id) => !ids.includes(id)))
+  const removeTasks = async (ids: string[]) => {
+    try {
+      await Promise.all(ids.map((id) => deleteTask(id)))
+      setSelected((list) => list.filter((id) => !ids.includes(id)))
+      await loadTasks()
+    } catch (error) {
+      onNotify(`删除失败：${(error as Error).message}`)
+    }
   }
 
-  const addTag = () => {
+  const addTag = async () => {
     const tag = tagDraft.trim()
     if (!tagTask) return
     if (!tag) {
@@ -273,22 +302,47 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
       setFormError('标签已存在')
       return
     }
-    patch(tagTask.id, (item) => ({ ...item, tags: [...item.tags, tag] }))
-    onNotify(`已为 ${tagTask.name} 添加标签 ${tag}`)
-    setTagTask(null)
-    setTagDraft('')
-    setFormError('')
+    try {
+      await updateTask(tagTask.id, { tags: [...tagTask.tags, tag] })
+      onNotify(`已为 ${tagTask.name} 添加标签 ${tag}`)
+      setTagTask(null)
+      setTagDraft('')
+      setFormError('')
+      await loadTasks()
+    } catch (error) {
+      setFormError((error as Error).message)
+    }
   }
 
-  const historyRows = (task: SpiderTask) => {
-    const fresh = extraRuns[task.id] ?? []
-    const seeded =
-      task.name === 'hourly_test1_runner'
-        ? recentExecutions().map((item) => `${item.time} · ${item.duration}`)
-        : task.lastRun
-          ? [task.lastRun]
-          : []
-    return [...fresh, ...seeded]
+  const removeTag = async (task: SpiderTask, tag: string) => {
+    try {
+      await updateTask(task.id, { tags: task.tags.filter((value) => value !== tag) })
+      if (filters.tag === tag) setFilters((current) => ({ ...current, tag: null }))
+      await loadTasks()
+    } catch (error) {
+      onNotify(`移除标签失败：${(error as Error).message}`)
+    }
+  }
+
+  const openHistory = (task: SpiderTask) => {
+    setHistoryTask(task)
+    setHistoryRuns(null)
+    fetchRuns(task.spider || task.project, 20)
+      .then((runs) => setHistoryRuns(runs))
+      .catch((error) => {
+        setHistoryRuns([])
+        onNotify(`读取运行记录失败：${(error as Error).message}`)
+      })
+  }
+
+  const historyRows = (): string[] => {
+    if (historyRuns === null) return []
+    return historyRuns.map(
+      (run) =>
+        `${formatDateTime(new Date(run.finishedAt ?? run.startedAt))} · ${run.status} · ${
+          run.items ?? '—'
+        } 条 · ${run.durationSec ?? '—'}s`,
+    )
   }
 
   const scheduleLabel =
@@ -466,7 +520,9 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
           </div>
         ) : null}
 
-        {visible.length === 0 ? (
+        {loading && tasks.length === 0 ? (
+          <Empty className="task-empty" description="正在从服务器加载任务..." />
+        ) : visible.length === 0 ? (
           <Empty className="task-empty" description="没有匹配的任务" />
         ) : (
           <div className="task-list">
@@ -508,10 +564,7 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
                         key={tag}
                         type="button"
                         className="task-pill task-tag"
-                        onClick={() => {
-                          patch(task.id, (item) => ({ ...item, tags: item.tags.filter((value) => value !== tag) }))
-                          if (filters.tag === tag) setFilters((current) => ({ ...current, tag: null }))
-                        }}
+                        onClick={() => void removeTag(task, tag)}
                       >
                         {tag}
                       </button>
@@ -566,7 +619,7 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
                     <IconThunderbolt />
                     运行
                   </button>
-                  <button type="button" className="task-icon-btn" aria-label={`${task.name} 执行记录`} onClick={() => setHistoryTask(task)}>
+                  <button type="button" className="task-icon-btn" aria-label={`${task.name} 执行记录`} onClick={() => openHistory(task)}>
                     <IconHistory />
                   </button>
                   <button type="button" className="task-icon-btn" aria-label={`复制 ${task.name}`} onClick={() => duplicate(task)}>
@@ -603,7 +656,7 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
       >
         <Form layout="vertical">
           <Form.Item label="名称" required>
-            <Input value={draft.name} placeholder="hourly_test1_runner" onChange={(value) => setDraft((current) => ({ ...current, name: value }))} />
+            <Input value={draft.name} placeholder="eastmoney_stock" onChange={(value) => setDraft((current) => ({ ...current, name: value }))} />
           </Form.Item>
           <Form.Item label="描述">
             <Input value={draft.description} placeholder="每小时运行一次test1.py" onChange={(value) => setDraft((current) => ({ ...current, description: value }))} />
@@ -664,7 +717,7 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
           setPendingDelete(null)
         }}
       >
-        <p>确定删除 {pendingDelete?.name}？此操作只影响当前演示列表。</p>
+        <p>确定删除 {pendingDelete?.name}？该任务将从服务器（data/tasks.json）中移除。</p>
       </Modal>
 
       <Modal
@@ -688,14 +741,12 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
         unmountOnExit
         onCancel={() => setHistoryTask(null)}
       >
-        {historyTask && historyRows(historyTask).length === 0 ? (
-          <Empty description="还没有执行记录" />
+        {historyTask && historyRuns !== null && historyRuns.length === 0 ? (
+          <Empty description="还没有执行记录，点击「运行」触发一次爬虫" />
         ) : (
           <ul className="task-history">
             {historyTask
-              ? historyRows(historyTask).map((row, index) => (
-                  <li key={`${row}-${index}`}>{row}</li>
-                ))
+              ? historyRows().map((row, index) => <li key={`${row}-${index}`}>{row}</li>)
               : null}
           </ul>
         )}

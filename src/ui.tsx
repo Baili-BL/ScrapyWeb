@@ -1,11 +1,18 @@
 import { Button } from '@arco-design/web-react'
 import { IconLeft, IconRight } from '@arco-design/web-react/icon'
 import type { ReactNode } from 'react'
-import { TASK_STATUS, DISK } from './data.ts'
-import type { Execution } from './data.ts'
+import type { Metrics } from './api.ts'
 import { IconPause, IconPlay } from './icons.tsx'
 
 export type Tone = 'blue' | 'green' | 'purple' | 'orange'
+
+/** 执行记录行：来自后端运行记录的展示投影。 */
+export type ExecRow = {
+  name: string
+  time: string
+  status: string
+  duration: string
+}
 
 export function cx(...names: Array<string | false | null | undefined>): string {
   return names.filter(Boolean).join(' ')
@@ -24,7 +31,7 @@ export function SectionCard({
   title: string
   subtitle?: string
   extra?: ReactNode
-  children: ReactNode
+  children?: ReactNode
 }) {
   return (
     <section className="panel">
@@ -72,7 +79,7 @@ export function MetricTile({ value, label, color }: { value: string; label: stri
   )
 }
 
-export function ExecutionRow({ item }: { item: Execution }) {
+export function ExecutionRow({ item }: { item: ExecRow }) {
   return (
     <div className="exec-row">
       <span className="exec-icon">
@@ -93,21 +100,21 @@ export function ExecutionRow({ item }: { item: Execution }) {
   )
 }
 
-export function StatusTiles() {
+export function StatusTiles({ running, paused }: { running: number; paused: number }) {
   return (
     <div className="status-grid">
       <div className="status-tile">
         <span className="status-glyph run">
           <IconPlay />
         </span>
-        <div className="status-num">{TASK_STATUS.running}</div>
+        <div className="status-num">{running}</div>
         <span className="pill run">运行中</span>
       </div>
       <div className="status-tile">
         <span className="status-glyph pause">
           <IconPause />
         </span>
-        <div className="status-num">{TASK_STATUS.paused}</div>
+        <div className="status-num">{paused}</div>
         <span className="pill pause">已暂停</span>
       </div>
     </div>
@@ -187,38 +194,33 @@ export function MemoryBar({
   )
 }
 
-export function DiskUsage() {
-  const iops = (value: number) => value.toLocaleString('en-US')
+export function DiskUsage({ disk }: { disk: Metrics['disk'] }) {
   return (
     <div className="disk-usage">
       <div className="metric-grid">
-        <MetricTile value={`${DISK.readIoGb.toFixed(2)} GB`} label="磁盘 I/O (读取)" color="#165dff" />
-        <MetricTile value={`${DISK.writeIoGb.toFixed(2)} GB`} label="磁盘 I/O (写入)" color="#722ed1" />
-        <MetricTile value={iops(DISK.readIops)} label="IOPS (读取)" color="#00b42a" />
-        <MetricTile value={iops(DISK.writeIops)} label="IOPS (写入)" color="#ff7d00" />
+        <MetricTile value={`${disk.usedGb.toFixed(2)} GB`} label="磁盘已用" color="#165dff" />
+        <MetricTile value={`${disk.freeGb.toFixed(2)} GB`} label="磁盘可用" color="#00b42a" />
+        <MetricTile value={`${disk.totalGb.toFixed(2)} GB`} label="磁盘总容量" color="#722ed1" />
+        <MetricTile value={`${disk.percent.toFixed(1)}%`} label="磁盘使用率" color="#ff7d00" />
       </div>
       <ul className="disk-list">
-        {DISK.mounts.map((path) => (
-          <li key={path}>
-            <div className="disk-meta">
-              <div>
-                <strong>{path}</strong>
-                <span>
-                  {DISK.device} ({DISK.fs})
-                </span>
-              </div>
-              <div className="disk-side">
-                <strong>{DISK.percent.toFixed(2)}%</strong>
-                <span>
-                  {DISK.usedGb.toFixed(2)} GB / {DISK.totalGb.toFixed(2)} GB
-                </span>
-              </div>
+        <li>
+          <div className="disk-meta">
+            <div>
+              <strong>项目所在卷</strong>
+              <span>实时读取自 fs.statfs</span>
             </div>
-            <div className="track disk-track">
-              <div className="fill fill-green" style={{ width: `${DISK.percent}%` }} />
+            <div className="disk-side">
+              <strong>{disk.percent.toFixed(1)}%</strong>
+              <span>
+                {disk.usedGb.toFixed(2)} GB / {disk.totalGb.toFixed(2)} GB
+              </span>
             </div>
-          </li>
-        ))}
+          </div>
+          <div className="track disk-track">
+            <div className="fill fill-green" style={{ width: `${Math.min(100, Math.max(0, disk.percent))}%` }} />
+          </div>
+        </li>
       </ul>
     </div>
   )

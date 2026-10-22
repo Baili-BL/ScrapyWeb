@@ -98,10 +98,10 @@ function Dashboard({
             onChange={onTab}
           >
             <Tabs.TabPane key="overview" title="系统概览">
-              <SystemOverview />
+              <SystemOverview tick={tick} />
             </Tabs.TabPane>
             <Tabs.TabPane key="tasks" title="任务监控">
-              <TaskMonitor />
+              <TaskMonitor tick={tick} />
             </Tabs.TabPane>
             <Tabs.TabPane key="nodes" title="工作节点">
               <WorkerNodes tick={tick} />
@@ -110,7 +110,7 @@ function Dashboard({
               <PerformancePanel tick={tick} />
             </Tabs.TabPane>
             <Tabs.TabPane key="charts" title="详细图表">
-              <ChartPanel />
+              <ChartPanel tick={tick} />
             </Tabs.TabPane>
           </Tabs>
       </div>

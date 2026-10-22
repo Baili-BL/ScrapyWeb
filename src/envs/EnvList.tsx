@@ -14,7 +14,7 @@ import {
 } from '@arco-design/web-react/icon'
 import type { ReactNode } from 'react'
 import { useMemo, useState } from 'react'
-import { DEMO_NOW, NODE } from '../data.ts'
+import { NODE } from '../data.ts'
 
 type EnvStatus = 'active' | 'paused'
 
@@ -53,6 +53,17 @@ const USERS = [
 ]
 
 const SEED_ENVS: PyEnv[] = [
+  {
+    id: 'scrapy',
+    name: 'scrapy_env',
+    createdAt: 'Oct 22, 2026',
+    status: 'active',
+    python: '3.12.10',
+    node: '本地',
+    deps: ['scrapy'],
+    tasks: 2,
+    collaborators: ['admin'],
+  },
   {
     id: 'requests',
     name: 'requests_env',
@@ -161,7 +172,7 @@ export function EnvList({ onNotify }: { onNotify: (text: string) => void }) {
       const created: PyEnv = {
         id: `env-${(envSeq += 1)}`,
         name,
-        createdAt: formatCreated(DEMO_NOW),
+        createdAt: formatCreated(new Date()),
         status: 'active',
         python: draft.python,
         node: draft.node === NODE.name ? '本地' : draft.node,

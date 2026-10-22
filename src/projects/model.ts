@@ -1,5 +1,3 @@
-import { DEMO_NOW } from '../data.ts'
-
 export type ProjectStatus = 'active' | 'paused'
 
 export type ProjectItem = {
@@ -48,9 +46,37 @@ export function formatProjectTime(date: Date): string {
   return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
-export const DEMO_PROJECT_TIME = formatProjectTime(DEMO_NOW)
+export const DEMO_PROJECT_TIME = formatProjectTime(new Date())
 
 export const SEED_PROJECTS: ProjectItem[] = [
+  {
+    id: 'eastmoney',
+    name: 'eastmoney_stock',
+    description: '东方财富公开行情接口抓取：实时快照 + 最近 120 个交易日日线（默认贵州茅台 600519）',
+    path: '/crawlers/scrapytask_demo',
+    archive: '—',
+    tasks: 1,
+    collaborators: 'admin',
+    node: '本地节点',
+    createdAt: '2026/10/22 13:45:10',
+    updatedAt: '2026/10/22 14:17:07',
+    status: 'active',
+    tags: ['scrapy', '行情'],
+  },
+  {
+    id: 'fcfco',
+    name: 'fcfco_reports',
+    description: '第一创业期货官网（fcfco.cn）「一创研究」栏目抓取：报告标题/日期/详情链接/微信文章外链',
+    path: '/crawlers/scrapytask_demo',
+    archive: '—',
+    tasks: 1,
+    collaborators: 'admin',
+    node: '本地节点',
+    createdAt: '2026/10/22 13:48:02',
+    updatedAt: '2026/10/22 14:07:46',
+    status: 'active',
+    tags: ['scrapy', '研报'],
+  },
   {
     id: 'requests',
     name: 'requests_project',

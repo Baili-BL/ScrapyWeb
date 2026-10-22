@@ -17,8 +17,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { nodeSize } from './model.ts'
 import type { FlowEdge, FlowNode, FlowNodeType, FlowRecord } from './model.ts'
 
-const PROJECTS = ['requests_project', '编排流程代码样例']
-const ENVS = ['requests_env']
+const PROJECTS = ['eastmoney_stock', 'fcfco_reports', 'requests_project', '编排流程代码样例']
+const ENVS = ['scrapy_env', 'requests_env']
 
 function cloneFlow(flow: FlowRecord): FlowRecord {
   return {

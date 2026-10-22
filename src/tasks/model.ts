@@ -1,9 +1,9 @@
-import { DEMO_NOW } from '../data.ts'
-
 export type TaskStatus = 'active' | 'paused'
 
 export type SpiderTask = {
   id: string
+  /** 关联的爬虫名（eastmoney_stock / fcfco_reports），演示任务可能为空。 */
+  spider: string
   name: string
   description: string
   project: string
@@ -33,8 +33,8 @@ export type TaskDraft = {
 export const EMPTY_DRAFT: TaskDraft = {
   name: '',
   description: '',
-  project: 'requests_project',
-  env: 'requests_env',
+  project: 'eastmoney_stock',
+  env: 'scrapy_env',
   node: '本地节点',
   command: '',
   cron: '0 * * * *',
@@ -54,7 +54,7 @@ export function dayKey(date: Date): string {
 const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
 
 /** 分 时 日 月 周。日、月使用 *，周使用 * 或 MON–SUN，时可以用 *。 */
-export function nextRunFromCron(cron: string, from = DEMO_NOW): string | null {
+export function nextRunFromCron(cron: string, from = new Date()): string | null {
   const parts = cron.trim().split(/\s+/)
   if (parts.length !== 5) return null
   const [minuteText, hourText, day, month, weekText] = parts
@@ -99,86 +99,3 @@ export function describeCron(cron: string): string | null {
   if (!WEEKDAYS.includes(week)) return null
   return `${clock}, only on ${week}`
 }
-
-export const SEED_TASKS: SpiderTask[] = [
-  {
-    id: 'hourly',
-    name: 'hourly_test1_runner',
-    description: '每小时运行一次test1.py',
-    project: 'requests_project',
-    env: 'requests_env',
-    node: '本地节点',
-    command: 'python src/test1.py',
-    cron: '0 * * * *',
-    concurrent: true,
-    nextRun: '2026-10-22 10:00:00',
-    lastRun: '2026-10-22 09:00:00',
-    status: 'active',
-    running: false,
-    tags: [],
-  },
-  {
-    id: 'daily',
-    name: 'daily_1py_runner',
-    description: '每天运行一次1.py',
-    project: 'requests_project',
-    env: 'requests_env',
-    node: '本地节点',
-    command: 'python 1.py',
-    cron: '0 0 * * *',
-    concurrent: false,
-    nextRun: '2026-10-23 00:00:00',
-    lastRun: '2026-10-22 00:00:00',
-    status: 'active',
-    running: false,
-    tags: [],
-  },
-  {
-    id: 'evening',
-    name: 'evening_test1_runner',
-    description: '每天 20:30 运行 test1.py',
-    project: 'requests_project',
-    env: 'requests_env',
-    node: '本地节点',
-    command: 'python src/test1.py',
-    cron: '30 20 * * *',
-    concurrent: false,
-    nextRun: '2026-10-22 20:30:00',
-    lastRun: '2026-10-21 20:30:00',
-    status: 'active',
-    running: false,
-    tags: [],
-  },
-  {
-    id: 'afternoon',
-    name: 'afternoon_test7_runner',
-    description: '每天下午运行 test7.py',
-    project: 'requests_project',
-    env: 'requests_env',
-    node: '本地节点',
-    command: 'python test7.py',
-    cron: '0 14 * * *',
-    concurrent: false,
-    nextRun: '2026-10-22 14:00:00',
-    lastRun: '2026-10-21 14:00:00',
-    status: 'active',
-    running: false,
-    tags: [],
-  },
-  {
-    id: 'morning',
-    name: 'morning_test7_runner',
-    description: '每天上午运行 test7.py',
-    project: 'requests_project',
-    env: 'requests_env',
-    node: '本地节点',
-    command: 'python test7.py',
-    cron: '0 9 * * *',
-    concurrent: false,
-    nextRun: null,
-    lastRun: '2026-04-09 20:41:46',
-    status: 'paused',
-    running: false,
-    tags: [],
-  },
-]

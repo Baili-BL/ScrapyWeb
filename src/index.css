@@ -682,6 +682,59 @@ select {
 
 .exec-side em.success { color: #00b42a; }
 .exec-side em.pending { color: #86909c; font-weight: 500; }
+.exec-side em.failed { color: #f53f3f; }
+.exec-side em.running { color: #165dff; font-weight: 500; }
+
+.report-scroll {
+  margin-top: 12px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.report-table th,
+.report-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid #f2f3f5;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.report-table th {
+  color: #86909c;
+  font-size: 12px;
+  font-weight: 500;
+  background: #fafbfc;
+  position: sticky;
+  top: 0;
+}
+
+.report-table td {
+  white-space: normal;
+}
+
+.report-table .report-date {
+  color: #86909c;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-link {
+  color: #165dff;
+  text-decoration: none;
+}
+
+.report-link:hover {
+  text-decoration: underline;
+}
+
+.report-muted {
+  color: #c9cdd4;
+}
 
 .dist-list {
   display: flex;
