@@ -2,6 +2,7 @@ import { Button, Form, Input, Switch, Table, Tag } from '@arco-design/web-react'
 import type { ColumnProps } from '@arco-design/web-react/es/Table'
 import { useState } from 'react'
 import { NODE } from '../data.ts'
+import { BotConfig } from '../bots/BotConfig.tsx'
 import { LogList } from '../logs/LogList.tsx'
 import { NodeList } from '../nodes/NodeList.tsx'
 import { EnvList } from '../envs/EnvList.tsx'
@@ -174,22 +175,7 @@ export function ModulePage({
   }
 
   if (menuKey === 'ai-bot') {
-    return (
-      <DataCard
-        title="机器人配置"
-        desc="把告警推送到外部机器人"
-        columns={[
-          { title: '名称', dataIndex: 'name' },
-          { title: '渠道', dataIndex: 'channel' },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            render: (value) => <StatusTag value={String(value)} />,
-          },
-        ]}
-        rows={[{ id: '1', name: '默认告警机器人', channel: '未绑定', status: '已暂停' }]}
-      />
-    )
+    return <BotConfig onNotify={onSaved} />
   }
 
   if (menuKey === 'settings-basic') {

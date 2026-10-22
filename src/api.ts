@@ -140,6 +140,47 @@ export type ReportItem = {
   crawled_at: string
 }
 
+export type BotType = 'wecom' | 'feishu'
+
+export type BotItem = {
+  id: string
+  type: BotType
+  name: string
+  webhookUrl: string
+  enabled: boolean
+  onlyFailed: boolean
+  createdAt: string
+}
+
+export type BotTestResult = { ok: boolean; message: string }
+
+export type BotDraftPayload = {
+  type: BotType
+  name: string
+  webhookUrl: string
+  onlyFailed: boolean
+}
+
+export function fetchBots(): Promise<BotItem[]> {
+  return request<BotItem[]>('/api/bots')
+}
+
+export function createBot(payload: BotDraftPayload): Promise<BotItem> {
+  return request<BotItem>('/api/bots', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function updateBot(id: string, patch: Partial<BotDraftPayload> & { enabled?: boolean }): Promise<BotItem> {
+  return request<BotItem>(`/api/bots/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) })
+}
+
+export function deleteBot(id: string): Promise<BotItem> {
+  return request<BotItem>(`/api/bots/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function testBot(id: string): Promise<BotTestResult> {
+  return request<BotTestResult>(`/api/bots/${encodeURIComponent(id)}/test`, { method: 'POST' })
+}
+
 export type TaskDraftPayload = {
   name: string
   description: string

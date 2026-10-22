@@ -22,6 +22,25 @@ const DATA = path.join(ROOT, 'data')
 const SCRAPY = path.join(ROOT, '.venv', 'Scripts', 'scrapy.exe')
 const TASKS_FILE = path.join(DATA, 'tasks.json')
 const RUNS_FILE = path.join(DATA, 'runs.json')
+const BOTS_FILE = path.join(DATA, 'bots.json')
+
+type BotType = 'wecom' | 'feishu'
+
+type BotRecord = {
+  id: string
+  type: BotType
+  name: string
+  webhookUrl: string
+  enabled: boolean
+  /** 仅推送失败告警；关闭则成功/失败都推送。 */
+  onlyFailed: boolean
+  createdAt: string
+}
+
+const BOT_URL_PATTERNS: Record<BotType, RegExp> = {
+  wecom: /^https:\/\/qyapi\.weixin\.qq\.com\/cgi-bin\/webhook\/send\?key=/,
+  feishu: /^https:\/\/open\.feishu\.cn\/open-apis\/bot\/v2\/hook\//,
+}
 
 type SpiderMeta = {
   name: string
@@ -149,6 +168,75 @@ function saveRuns(runs: RunRecord[]): void {
 function lastRunFromRuns(spider: string): string | null {
   const found = loadRuns().find((run) => run.spider === spider && run.finishedAt)
   return found?.finishedAt ?? null
+}
+
+/* ------------------------- 机器人推送（企业微信 / 飞书） ------------------------- */
+
+function loadBots(): BotRecord[] {
+  ensureDataDir()
+  return loadJson<BotRecord[]>(BOTS_FILE, [])
+}
+
+function saveBots(bots: BotRecord[]): void {
+  saveJson(BOTS_FILE, bots)
+}
+
+function formatStampLocal(date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/** 向单个机器人发送 text 消息，返回是否成功与网关回执。 */
+async function sendToBot(bot: BotRecord, text: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const response = await fetch(bot.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(
+        bot.type === 'wecom'
+          ? { msgtype: 'text', text: { content: text } }
+          : { msg_type: 'text', content: { text } },
+      ),
+    })
+    const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null
+    if (!response.ok) {
+      return { ok: false, message: `HTTP ${response.status}` }
+    }
+    if (bot.type === 'wecom') {
+      const errcode = Number(payload?.errcode ?? -1)
+      const errmsg = String(payload?.errmsg ?? '未知')
+      return errcode === 0 ? { ok: true, message: errmsg } : { ok: false, message: `errcode=${errcode} ${errmsg}` }
+    }
+    const code = Number(payload?.code ?? -1)
+    const msg = String(payload?.msg ?? '未知')
+    return code === 0 ? { ok: true, message: msg } : { ok: false, message: `code=${code} ${msg}` }
+  } catch (error) {
+    return { ok: false, message: String(error) }
+  }
+}
+
+/** 爬虫运行结束后向启用的机器人推送通知（异步，不阻塞请求）。 */
+function notifyBotsOfRun(status: RunRecord['status'], spider: string, items: number | null, durationSec: number | null, message: string | null): void {
+  if (status === 'running') return
+  const bots = loadBots().filter((bot) => bot.enabled && (!bot.onlyFailed || status === 'failed'))
+  if (!bots.length) return
+  const statusLabel = status === 'success' ? '✅ 成功' : '❌ 失败'
+  const text = [
+    '【ScrapyWeb】爬虫运行通知',
+    `任务：${spider}`,
+    `状态：${statusLabel}`,
+    `抓取：${items ?? '—'} 条`,
+    `耗时：${durationSec ?? '—'}s`,
+    message ? `错误：${message}` : null,
+    `时间：${formatStampLocal()}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+  for (const bot of bots) {
+    void sendToBot(bot, text).then((result) => {
+      if (!result.ok) console.warn(`[api] bot ${bot.name}(${bot.type}) 推送失败: ${result.message}`)
+    })
+  }
 }
 
 /* ------------------------- 版本探测（缓存） ------------------------- */
@@ -303,6 +391,7 @@ function finishRun(runId: string, status: RunRecord['status'], durationMs: numbe
     task.lastRun = new Date().toISOString()
     saveTasks(tasks)
   }
+  notifyBotsOfRun(status, run?.spider ?? 'unknown', items, Number((durationMs / 1000).toFixed(1)), message)
 }
 
 /* ------------------------- 产出文件 ------------------------- */
@@ -557,6 +646,100 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
     let runs = loadRuns()
     if (spider) runs = runs.filter((run) => run.spider === spider)
     sendJson(res, 200, runs.slice(0, Number.isFinite(limit) ? limit : 50))
+    return true
+  }
+
+  /* ------------------------- 机器人配置 ------------------------- */
+
+  if (pathname === '/api/bots' && method === 'GET') {
+    sendJson(res, 200, loadBots())
+    return true
+  }
+
+  if (pathname === '/api/bots' && method === 'POST') {
+    const body = await readBody(req)
+    const type = String(body.type ?? '') as BotType
+    const name = String(body.name ?? '').trim()
+    const webhookUrl = String(body.webhookUrl ?? '').trim()
+    if (type !== 'wecom' && type !== 'feishu') {
+      sendJson(res, 400, { error: '机器人类型仅支持 wecom（企业微信）/ feishu（飞书）' })
+      return true
+    }
+    if (!name) {
+      sendJson(res, 400, { error: '名称不能为空' })
+      return true
+    }
+    if (!BOT_URL_PATTERNS[type].test(webhookUrl)) {
+      sendJson(res, 400, {
+        error:
+          type === 'wecom'
+            ? '企业微信 webhook 需形如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx'
+            : '飞书 webhook 需形如 https://open.feishu.cn/open-apis/bot/v2/hook/xxx',
+      })
+      return true
+    }
+    const bots = loadBots()
+    const bot: BotRecord = {
+      id: `bot-${Date.now()}`,
+      type,
+      name,
+      webhookUrl,
+      enabled: true,
+      onlyFailed: Boolean(body.onlyFailed),
+      createdAt: new Date().toISOString(),
+    }
+    bots.push(bot)
+    saveBots(bots)
+    sendJson(res, 200, bot)
+    return true
+  }
+
+  const botMatch = /^\/api\/bots\/([^/]+)$/.exec(pathname)
+  if (botMatch) {
+    const id = decodeURIComponent(botMatch[1])
+    const bots = loadBots()
+    const index = bots.findIndex((bot) => bot.id === id)
+    if (index === -1) {
+      sendJson(res, 404, { error: '机器人不存在' })
+      return true
+    }
+    if (method === 'PUT') {
+      const body = await readBody(req)
+      const bot = bots[index]
+      if (typeof body.name === 'string' && body.name.trim()) bot.name = body.name.trim()
+      if (typeof body.webhookUrl === 'string' && body.webhookUrl.trim()) {
+        const url = body.webhookUrl.trim()
+        if (!BOT_URL_PATTERNS[bot.type].test(url)) {
+          sendJson(res, 400, { error: 'webhook 地址格式不正确' })
+          return true
+        }
+        bot.webhookUrl = url
+      }
+      if (typeof body.enabled === 'boolean') bot.enabled = body.enabled
+      if (typeof body.onlyFailed === 'boolean') bot.onlyFailed = body.onlyFailed
+      saveBots(bots)
+      sendJson(res, 200, bot)
+      return true
+    }
+    if (method === 'DELETE') {
+      const [removed] = bots.splice(index, 1)
+      saveBots(bots)
+      sendJson(res, 200, removed)
+      return true
+    }
+  }
+
+  const botTestMatch = /^\/api\/bots\/([^/]+)\/test$/.exec(pathname)
+  if (botTestMatch && method === 'POST') {
+    const id = decodeURIComponent(botTestMatch[1])
+    const bot = loadBots().find((item) => item.id === id)
+    if (!bot) {
+      sendJson(res, 404, { error: '机器人不存在' })
+      return true
+    }
+    const text = `【ScrapyWeb】测试消息\n这是一条来自机器人配置页的测试推送。\n时间：${formatStampLocal()}`
+    const result = await sendToBot(bot, text)
+    sendJson(res, 200, result)
     return true
   }
 
