@@ -21,6 +21,38 @@ export function IconApps({ size = 20 }: IconProps) {
   )
 }
 
+/** 品牌图标：八爪蜘蛛 + 监控脉冲（雷达体）。 */
+export function SpiderIcon({ size = 20 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
+        {/* 八条腿（左右各四） */}
+        <path d="M8.6 10.6C6.8 9.4 5.4 7.6 4.8 5.2" />
+        <path d="M7.8 12.6C5.6 12 3.8 10.6 2.4 8.6" />
+        <path d="M7.8 13.8C5.6 14.4 3.8 15.8 2.4 17.8" />
+        <path d="M8.6 15.4C6.8 16.8 5.6 18.6 5 21" />
+        <path d="M15.4 10.6C17.2 9.4 18.6 7.6 19.2 5.2" />
+        <path d="M16.2 12.6C18.4 12 20.2 10.6 21.6 8.6" />
+        <path d="M16.2 13.8C18.4 14.4 20.2 15.8 21.6 17.8" />
+        <path d="M15.4 15.4C17.2 16.8 18.4 18.6 19 21" />
+        {/* 蜘蛛躯体（雷达） */}
+        <circle cx="12" cy="13" r="4.6" />
+      </g>
+      {/* 监控脉冲 */}
+      <path
+        d="M9.5 13.2h1.5l1-2l1.2 4l1-2h1.8"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* 复眼 */}
+      <circle cx="10.6" cy="10.9" r="0.8" fill="currentColor" />
+      <circle cx="13.4" cy="10.9" r="0.8" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function IconClock({ size }: IconProps) {
   return (
     <Svg size={size}>

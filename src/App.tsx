@@ -6,7 +6,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { clearAuthToken, setAuthToken } from './api.ts'
 import { AuthPage } from './auth/AuthPage.tsx'
 import type { AuthState } from './auth/AuthPage.tsx'
-import { IconApps } from './icons.tsx'
+import { SpiderIcon } from './icons.tsx'
 import { ModulePage } from './layout/ModulePage.tsx'
 import { SideMenu } from './layout/SideMenu.tsx'
 import { MENU_PATHS } from './layout/menu.ts'
@@ -119,7 +119,7 @@ function Dashboard({
           <header className="page-header">
             <div className="brand">
               <span className="brand-mark">
-                <IconApps />
+                <SpiderIcon size={28} />
               </span>
               <div className="brand-text">
                 <h1>监控仪表盘</h1>

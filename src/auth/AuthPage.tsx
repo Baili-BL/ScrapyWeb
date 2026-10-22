@@ -2,6 +2,7 @@ import { Button, Form, Input, Tabs } from '@arco-design/web-react'
 import { useState } from 'react'
 import type { AuthUser } from '../api.ts'
 import { login, register } from '../api.ts'
+import { SpiderIcon } from '../icons.tsx'
 
 export type AuthState = { token: string; user: AuthUser }
 
@@ -60,7 +61,9 @@ export function AuthPage({ onAuth }: { onAuth: (auth: AuthState) => void }) {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="auth-logo">SW</span>
+          <span className="auth-logo">
+            <SpiderIcon size={26} />
+          </span>
           <div>
             <h1>ScrapyWeb</h1>
             <p>爬虫任务监控与编排平台</p>

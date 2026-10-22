@@ -1,6 +1,5 @@
 import { Dropdown, Menu, Tooltip } from '@arco-design/web-react'
 import {
-  IconApps,
   IconBook,
   IconBranch,
   IconCode,
@@ -22,6 +21,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { ROLE_LABEL } from '../api.ts'
 import type { AuthUser } from '../api.ts'
+import { SpiderIcon } from '../icons.tsx'
 import { MENU_GROUPS, menuKeyFromPath, menuPath } from './menu.ts'
 import type { MenuEntry, MenuKey } from './menu.ts'
 
@@ -44,7 +44,7 @@ function FoldIcon() {
 }
 
 const ICONS: Record<string, ReactNode> = {
-  dashboard: <IconApps />,
+  dashboard: <SpiderIcon size={16} />,
   tasks: <IconList />,
   workflow: <IconBranch />,
   projects: <IconCommon />,
