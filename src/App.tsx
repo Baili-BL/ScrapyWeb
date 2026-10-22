@@ -3,7 +3,7 @@ import { IconRefresh } from '@arco-design/web-react/icon'
 import zhCN from '@arco-design/web-react/es/locale/zh-CN'
 import { useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { clearAuthToken } from './api.ts'
+import { clearAuthToken, setAuthToken } from './api.ts'
 import { AuthPage } from './auth/AuthPage.tsx'
 import type { AuthState } from './auth/AuthPage.tsx'
 import { IconApps } from './icons.tsx'
@@ -22,7 +22,11 @@ const AUTH_KEY = 'scrapyweb-auth'
 function loadAuth(): AuthState | null {
   try {
     const raw = localStorage.getItem(AUTH_KEY)
-    return raw ? (JSON.parse(raw) as AuthState) : null
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as AuthState
+    // 兼容修复：把 token 同步给 API 客户端使用的键
+    if (parsed?.token) setAuthToken(parsed.token)
+    return parsed
   } catch {
     return null
   }
@@ -37,6 +41,7 @@ export default function App() {
 
   const handleAuth = (next: AuthState) => {
     localStorage.setItem(AUTH_KEY, JSON.stringify(next))
+    setAuthToken(next.token)
     setAuth(next)
     message.success?.(`欢迎，${next.user.displayName}`)
   }

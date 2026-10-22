@@ -479,8 +479,14 @@ export type TaskDraftPayload = {
 
 const TOKEN_KEY = 'scrapyweb-auth-token'
 
+export const AUTH_TOKEN_KEY = TOKEN_KEY
+
 export function getAuthToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? ''
+}
+
+export function setAuthToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token)
 }
 
 export function clearAuthToken(): void {
