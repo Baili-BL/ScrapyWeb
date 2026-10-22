@@ -71,6 +71,37 @@ function statusLabel(status: SpiderTask['status']): string {
   return status === 'active' ? '活跃' : '已暂停'
 }
 
+/* ------------------------- 标签自动颜色 ------------------------- */
+
+const TAG_PALETTE = ['#165dff', '#00b42a', '#ff7d00', '#f53f3f', '#722ed1', '#14c9c9', '#f7ba1e', '#f77eb9', '#3491fa', '#a871e3']
+
+function hashTag(tag: string): number {
+  let hash = 0
+  for (let index = 0; index < tag.length; index += 1) {
+    hash = Math.imul(hash, 31) + tag.charCodeAt(index)
+  }
+  return hash >>> 0
+}
+
+/** 标签颜色：优先 localStorage 手动覆盖，否则按标签名哈希自动分配（同名标签恒定同色）。 */
+function tagColor(tag: string): string {
+  if (tag) {
+    const override = window.localStorage.getItem(`scrapyweb-tag-color:${tag}`)
+    if (override) return override
+  }
+  return TAG_PALETTE[hashTag(tag) % TAG_PALETTE.length]
+}
+
+function tagPillStyle(tag: string): React.CSSProperties {
+  const color = tagColor(tag)
+  return { background: `${color}1a`, color, borderColor: `${color}59` }
+}
+
+function pickTagColor(tag: string, color: string): void {
+  if (!tag) return
+  window.localStorage.setItem(`scrapyweb-tag-color:${tag}`, color)
+}
+
 export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
   const [tasks, setTasks] = useState<SpiderTask[]>([])
   const [loading, setLoading] = useState(true)
@@ -85,6 +116,7 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
   const [historyRuns, setHistoryRuns] = useState<RunRecord[] | null>(null)
   const [tagTask, setTagTask] = useState<SpiderTask | null>(null)
   const [tagDraft, setTagDraft] = useState('')
+  const [, bumpTagColors] = useState(0)
 
   const loadTasks = async () => {
     try {
@@ -445,7 +477,7 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
             label="标签"
             icon={<IconTag />}
             active={filters.tag !== null}
-            options={[{ key: '__all', label: '全部标签' }, ...tagOptions.map((name) => ({ key: name, label: name }))]}
+            options={[{ key: '__all', label: '全部标签' }, ...tagOptions.map((name) => ({ key: name, label: name, color: tagColor(name) }))]}
             onPick={(key) => setFilters((current) => ({ ...current, tag: key === '__all' ? null : key }))}
           />
           {filters.tag ? (
@@ -564,6 +596,8 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
                         key={tag}
                         type="button"
                         className="task-pill task-tag"
+                        style={tagPillStyle(tag)}
+                        title="点击移除该标签"
                         onClick={() => void removeTag(task, tag)}
                       >
                         {tag}
@@ -730,6 +764,27 @@ export function TaskList({ onNotify }: { onNotify: (text: string) => void }) {
         onOk={addTag}
       >
         <Input value={tagDraft} placeholder="标签名称" onChange={setTagDraft} />
+        <div className="tag-color-preview">
+          <span className="tag-color-label">自动颜色</span>
+          <span className="task-pill" style={tagPillStyle(tagDraft.trim() || '标签')}>
+            {tagDraft.trim() || '标签'}
+          </span>
+        </div>
+        <div className="tag-color-row">
+          {TAG_PALETTE.map((color) => (
+            <button
+              key={color}
+              type="button"
+              className={`tag-color-dot${tagColor(tagDraft.trim() || '标签') === color ? ' on' : ''}`}
+              style={{ background: color }}
+              aria-label={`使用颜色 ${color}`}
+              onClick={() => {
+                pickTagColor(tagDraft.trim(), color)
+                bumpTagColors((value) => value + 1)
+              }}
+            />
+          ))}
+        </div>
         {formError ? <p className="task-form-error">{formError}</p> : null}
       </Modal>
 
@@ -765,7 +820,7 @@ function FilterDrop({
   label: string
   icon: ReactNode
   active: boolean
-  options: { key: string; label: string }[]
+  options: { key: string; label: string; color?: string }[]
   onPick: (key: string) => void
 }) {
   return (
@@ -775,7 +830,10 @@ function FilterDrop({
       droplist={
         <Menu onClickMenuItem={(key) => onPick(key)}>
           {options.map((item) => (
-            <Menu.Item key={item.key}>{item.label}</Menu.Item>
+            <Menu.Item key={item.key}>
+              {item.color ? <i className="menu-dot" style={{ background: item.color }} /> : null}
+              {item.label}
+            </Menu.Item>
           ))}
         </Menu>
       }

@@ -1688,6 +1688,54 @@ select {
   font-size: 13px;
 }
 
+.tag-color-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.tag-color-label {
+  color: #86909c;
+  font-size: 12px;
+}
+
+.tag-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.tag-color-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.15s ease;
+}
+
+.tag-color-dot:hover {
+  transform: scale(1.15);
+}
+
+.tag-color-dot.on {
+  border-color: #1d2129;
+  box-shadow: 0 0 0 2px #fff inset;
+}
+
+.menu-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
 .cron-help {
   margin-top: 8px;
   color: rgb(115, 122, 135);
