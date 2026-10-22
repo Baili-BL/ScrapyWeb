@@ -372,6 +372,57 @@ export function chatAi(messages: AiChatMessage[]): Promise<{ reply: string; late
   return request<{ reply: string; latencyMs: number }>('/api/ai/chat', { method: 'POST', body: JSON.stringify({ messages }) })
 }
 
+/* ------------------------- 项目与环境 ------------------------- */
+
+export type ProjectItem = {
+  name: string
+  title: string
+  description: string
+  tasks: number
+  lastRun: string | null
+  lastItems: number | null
+  tags: string[]
+  env: string
+}
+
+export function fetchProjects(): Promise<{ projects: ProjectItem[]; generatedAt: string }> {
+  return request<{ projects: ProjectItem[]; generatedAt: string }>('/api/projects')
+}
+
+export function updateProjectDescription(name: string, description: string): Promise<{ name: string; description: string }> {
+  return request<{ name: string; description: string }>(`/api/projects/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ description }),
+  })
+}
+
+export type EnvItem = {
+  name: string
+  path: string
+  python: string
+  scrapy: string
+  tasks: number
+  isProjectVenv: boolean
+}
+
+export function fetchEnvs(): Promise<{ envs: EnvItem[] }> {
+  return request<{ envs: EnvItem[] }>('/api/envs')
+}
+
+export function createEnv(name: string): Promise<{ ok: boolean; name: string; path: string }> {
+  return request<{ ok: boolean; name: string; path: string }>('/api/envs', { method: 'POST', body: JSON.stringify({ name }) })
+}
+
+export function installEnvScrapy(name: string): Promise<{ ok: boolean; scrapyVersion: string; latencySec: number }> {
+  return request<{ ok: boolean; scrapyVersion: string; latencySec: number }>(`/api/envs/${encodeURIComponent(name)}/install`, {
+    method: 'POST',
+  })
+}
+
+export function deleteEnv(name: string): Promise<{ ok: boolean; name: string }> {
+  return request<{ ok: boolean; name: string }>(`/api/envs/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
 /* ------------------------- 分布式节点 ------------------------- */
 
 export type LocalNodeInfo = {

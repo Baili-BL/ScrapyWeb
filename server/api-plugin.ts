@@ -1060,6 +1060,136 @@ async function detectPythons(): Promise<DetectedPython[]> {
   }))
 }
 
+/* ------------------------- 定时调度器 ------------------------- */
+
+const scheduledMinuteKeys = new Set<string>()
+
+function cronFieldMatches(field: string, value: number, names?: string[]): boolean {
+  if (field === '*') return true
+  const step = /^\*\/(\d+)$/.exec(field)
+  if (step) return value % Number(step[1]) === 0
+  return field.split(',').some((part) => {
+    const range = /^(\d+)-(\d+)$/.exec(part)
+    if (range) return value >= Number(range[1]) && value <= Number(range[2])
+    if (names) {
+      const index = names.indexOf(part.toUpperCase())
+      if (index >= 0) return index === value
+    }
+    return Number(part) === value
+  })
+}
+
+export function cronMatchesNow(cron: string, now: Date): boolean {
+  const parts = cron.trim().split(/\s+/)
+  if (parts.length !== 5) return false
+  const [minute, hour, dom, month, dow] = parts
+  const weekdayNames = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
+  return (
+    cronFieldMatches(minute, now.getMinutes()) &&
+    cronFieldMatches(hour, now.getHours()) &&
+    cronFieldMatches(dom, now.getDate()) &&
+    cronFieldMatches(month, now.getMonth() + 1) &&
+    (dow === '*' || cronFieldMatches(dow, now.getDay(), weekdayNames))
+  )
+}
+
+/** 每 20 秒扫描一次活跃任务，命中 cron 表达式即真实运行爬虫（按分钟去重）。 */
+function startScheduler(): void {
+  setInterval(() => {
+    const now = new Date()
+    const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`
+    for (const task of loadTasks()) {
+      if (task.status !== 'active' || !task.spider) continue
+      if (!cronMatchesNow(task.cron, now)) continue
+      const dedupeKey = `${task.id}@${minuteKey}`
+      if (scheduledMinuteKeys.has(dedupeKey)) continue
+      scheduledMinuteKeys.add(dedupeKey)
+      if (scheduledMinuteKeys.size > 5000) scheduledMinuteKeys.clear()
+      const meta = SPIDERS.find((item) => item.name === task.spider)
+      if (!meta) continue
+      if (running.has(meta.name)) {
+        console.log(`[scheduler] ${meta.name} 正在运行，跳过本次触发（${task.name}）`)
+        continue
+      }
+      const result = startCrawl(meta)
+      console.log(`[scheduler] cron 触发 ${meta.name}（${task.name}）-> ${'error' in result ? 'busy' : result.id}`)
+    }
+  }, 20 * 1000)
+  console.log('[scheduler] 定时调度器已启动（每 20s 扫描一次任务 cron）')
+}
+
+/* ------------------------- 项目与环境 ------------------------- */
+
+const PROJECT_OVERRIDES_FILE = path.join(DATA, 'projects.json')
+const VENVS_DIR = path.join(ROOT, '.venvs')
+
+function loadProjectOverrides(): Record<string, { description?: string }> {
+  return loadJson<Record<string, { description?: string }>>(PROJECT_OVERRIDES_FILE, {})
+}
+
+async function buildProjects() {
+  const overrides = loadProjectOverrides()
+  const tasks = loadTasks()
+  const runs = loadRuns()
+  const outputs = await buildOutputs()
+  return SPIDERS.map((spider) => {
+    const spiderTasks = tasks.filter((task) => task.spider === spider.name)
+    const lastRun = runs.find((run) => run.spider === spider.name && run.finishedAt)
+    const output = outputs.find((item) => spider.outputs.includes(item.file) && item.items !== null)
+    return {
+      name: spider.name,
+      title: spider.title,
+      description: overrides[spider.name]?.description ?? spider.description,
+      tasks: spiderTasks.length,
+      lastRun: lastRun?.finishedAt ?? null,
+      lastItems: output?.items ?? null,
+      tags: spider.tags,
+      env: spider.env,
+    }
+  })
+}
+
+async function detectEnvs() {
+  const tasks = loadTasks()
+  const candidates: Array<{ name: string; path: string; isProjectVenv: boolean }> = [
+    { name: 'scrapy_env', path: path.join(ROOT, '.venv'), isProjectVenv: true },
+  ]
+  if (existsSync(VENVS_DIR)) {
+    for (const dir of await fsp.readdir(VENVS_DIR, { withFileTypes: true })) {
+      if (dir.isDirectory() && existsSync(path.join(VENVS_DIR, dir.name, 'Scripts', 'python.exe'))) {
+        candidates.push({ name: dir.name, path: path.join(VENVS_DIR, dir.name), isProjectVenv: false })
+      }
+    }
+  }
+  const envs: Array<{ name: string; path: string; python: string; scrapy: string; tasks: number; isProjectVenv: boolean }> = []
+  for (const candidate of candidates) {
+    const pythonExe = path.join(candidate.path, 'Scripts', 'python.exe')
+    let python = '未知'
+    let scrapy = ''
+    try {
+      const { stdout } = await execFileAsync(pythonExe, ['--version'], { timeout: 10000 })
+      python = stdout.trim().replace(/^Python\s+/i, '')
+    } catch {
+      python = '未知'
+    }
+    try {
+      const { stdout } = await execFileAsync(pythonExe, ['-c', 'import scrapy;print(scrapy.__version__)'], { timeout: 15000 })
+      scrapy = stdout.trim()
+    } catch {
+      scrapy = ''
+    }
+    envs.push({
+      name: candidate.name,
+      path: candidate.path,
+      python,
+      scrapy,
+      tasks: tasks.filter((task) => task.env === candidate.name).length,
+      isProjectVenv: candidate.isProjectVenv,
+    })
+  }
+  return envs
+}
+
 /* ------------------------- HTTP 工具 ------------------------- */
 
 function sendJson(res: import('node:http').ServerResponse, status: number, payload: unknown): void {
@@ -1232,7 +1362,7 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
   }
 
   if (pathname === '/api/health' && method === 'GET') {
-    sendJson(res, 200, { ok: true, ts: new Date().toISOString() })
+    sendJson(res, 200, { ok: true, scheduler: true, ts: new Date().toISOString() })
     return true
   }
 
@@ -1568,6 +1698,119 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
     return true
   }
 
+  /* ------------------------- 项目与环境 ------------------------- */
+
+  if (pathname === '/api/projects' && method === 'GET') {
+    sendJson(res, 200, { projects: await buildProjects(), generatedAt: new Date().toISOString() })
+    return true
+  }
+
+  const projectMatch = /^\/api\/projects\/([^/]+)$/.exec(pathname)
+  if (projectMatch && method === 'PUT') {
+    const name = decodeURIComponent(projectMatch[1])
+    const meta = SPIDERS.find((item) => item.name === name)
+    if (!meta) {
+      sendJson(res, 404, { error: '项目不存在（项目由爬虫注册表定义）' })
+      return true
+    }
+    const body = await readBody(req)
+    const overrides = loadProjectOverrides()
+    overrides[name] = { ...overrides[name], description: String(body.description ?? '').trim() }
+    saveJson(PROJECT_OVERRIDES_FILE, overrides)
+    sendJson(res, 200, { name, description: overrides[name].description })
+    return true
+  }
+
+  if (pathname === '/api/envs' && method === 'GET') {
+    sendJson(res, 200, { envs: await detectEnvs() })
+    return true
+  }
+
+  if (pathname === '/api/envs' && method === 'POST') {
+    const body = await readBody(req)
+    const name = String(body.name ?? '').trim()
+    if (!/^[a-zA-Z0-9_-]{2,32}$/.test(name)) {
+      sendJson(res, 400, { error: '环境名需 2-32 位，仅限字母/数字/下划线/中划线' })
+      return true
+    }
+    ensureDataDir()
+    if (!existsSync(VENVS_DIR)) mkdirSync(VENVS_DIR, { recursive: true })
+    const target = path.join(VENVS_DIR, name)
+    if (existsSync(target)) {
+      sendJson(res, 400, { error: '同名虚拟环境已存在' })
+      return true
+    }
+    const code = await new Promise<number>((resolve) => {
+      const child = spawn(path.join(ROOT, '.venv', 'Scripts', 'python.exe'), ['-m', 'venv', target], {
+        cwd: ROOT,
+        windowsHide: true,
+      })
+      const timer = setTimeout(() => child.kill(), 180000)
+      child.on('error', () => resolve(-1))
+      child.on('close', (value) => {
+        clearTimeout(timer)
+        resolve(value ?? -1)
+      })
+    })
+    if (code !== 0) {
+      sendJson(res, 500, { error: `虚拟环境创建失败（exit ${code}）` })
+      return true
+    }
+    sendJson(res, 200, { ok: true, name, path: target })
+    return true
+  }
+
+  const envInstallMatch = /^\/api\/envs\/([^/]+)\/install$/.exec(pathname)
+  if (envInstallMatch && method === 'POST') {
+    const name = decodeURIComponent(envInstallMatch[1])
+    const envPath = name === 'scrapy_env' ? path.join(ROOT, '.venv') : path.join(VENVS_DIR, name)
+    const pipExe = path.join(envPath, 'Scripts', 'pip.exe')
+    if (!existsSync(pipExe)) {
+      sendJson(res, 404, { error: '虚拟环境不存在' })
+      return true
+    }
+    const started = Date.now()
+    const code = await new Promise<number>((resolve) => {
+      const child = spawn(pipExe, ['install', 'scrapy'], { cwd: ROOT, windowsHide: true })
+      const timer = setTimeout(() => child.kill(), 600000)
+      child.on('error', () => resolve(-1))
+      child.on('close', (value) => {
+        clearTimeout(timer)
+        resolve(value ?? -1)
+      })
+    })
+    let scrapyVersion = ''
+    try {
+      const { stdout } = await execFileAsync(path.join(envPath, 'Scripts', 'python.exe'), ['-c', 'import scrapy;print(scrapy.__version__)'], { timeout: 15000 })
+      scrapyVersion = stdout.trim()
+    } catch {
+      scrapyVersion = ''
+    }
+    if (code !== 0 || !scrapyVersion) {
+      sendJson(res, 500, { error: `Scrapy 安装失败（exit ${code}，${Math.round((Date.now() - started) / 1000)}s）` })
+      return true
+    }
+    sendJson(res, 200, { ok: true, scrapyVersion, latencySec: Math.round((Date.now() - started) / 1000) })
+    return true
+  }
+
+  const envMatch = /^\/api\/envs\/([^/]+)$/.exec(pathname)
+  if (envMatch && method === 'DELETE') {
+    const name = decodeURIComponent(envMatch[1])
+    if (name === 'scrapy_env') {
+      sendJson(res, 400, { error: '项目主环境 scrapy_env 不能删除' })
+      return true
+    }
+    const target = path.join(VENVS_DIR, name)
+    if (!existsSync(target) || !target.startsWith(VENVS_DIR)) {
+      sendJson(res, 404, { error: '虚拟环境不存在' })
+      return true
+    }
+    await fsp.rm(target, { recursive: true, force: true })
+    sendJson(res, 200, { ok: true, name })
+    return true
+  }
+
   if (pathname === '/api/overview' && method === 'GET') {
     sendJson(res, 200, await buildOverview())
     return true
@@ -1870,15 +2113,11 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
     return true
   }
 
-  if (pathname === '/api/health' && method === 'GET') {
-    sendJson(res, 200, { ok: true, ts: new Date().toISOString() })
-    return true
-  }
-
   return false
 }
 
 export function apiPlugin(): Plugin {
+  startScheduler()
   const handler = async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, next: () => void) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     if (!url.pathname.startsWith('/api/')) {
