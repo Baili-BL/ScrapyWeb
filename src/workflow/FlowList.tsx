@@ -154,7 +154,7 @@ export function FlowList({ onNotify }: { onNotify: (text: string) => void }) {
                     <IconPlayArrow />
                     {isRunning ? '运行中…' : '运行'}
                   </button>
-                  <button type="button" className="task-icon-btn" aria-label={`编辑 ${flow.name}`} onClick={() => setEditing(flow)}>
+                  <button type="button" className="task-text-btn" onClick={() => setEditing(flow)}>
                     编辑
                   </button>
                   <button

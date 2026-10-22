@@ -1460,6 +1460,8 @@ select {
   font-weight: 400;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.15);
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .task-create:hover,
@@ -2506,6 +2508,7 @@ span.project-file {
   color: rgb(115, 122, 135);
   font-style: normal;
   font-size: 12px;
+  flex-wrap: wrap;
 }
 
 .flow-card-actions {
@@ -2514,6 +2517,7 @@ span.project-file {
   gap: 8px;
   margin-top: auto;
   padding-top: 12px;
+  flex-wrap: wrap;
 }
 
 .flow-run-hint {
@@ -2538,13 +2542,22 @@ span.project-file {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  flex-wrap: wrap;
   padding: 18px 24px 12px;
+}
+
+.flow-top > div:first-child {
+  min-width: 0;
+  flex: 1;
 }
 
 .flow-top h1 {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .flow-top p {
@@ -2558,6 +2571,8 @@ span.project-file {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .flow-back,
@@ -2568,6 +2583,7 @@ span.project-file {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
   cursor: pointer;
   color: rgb(12, 13, 14);
   background: #fff;
@@ -2595,6 +2611,7 @@ span.project-file {
   font-size: 13px;
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
 }
 
 .flow-work {
@@ -2604,6 +2621,16 @@ span.project-file {
   grid-template-columns: minmax(0, 1fr) 300px;
   gap: 12px;
   padding: 0 16px 16px;
+}
+
+@media (max-width: 900px) {
+  .flow-work {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .flow-props {
+    max-height: 320px;
+  }
 }
 
 .flow-board {
@@ -2623,6 +2650,12 @@ span.project-file {
   padding: 14px 16px;
   border-bottom: 1px solid rgb(234, 237, 241);
   background: #fff;
+}
+
+@media (max-width: 760px) {
+  .flow-meta {
+    grid-template-columns: 1fr;
+  }
 }
 
 .flow-meta label,
@@ -2673,6 +2706,7 @@ span.project-file {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   cursor: grab;
   user-select: none;
+  overflow: hidden;
 }
 
 .flow-node.start {
@@ -2698,6 +2732,13 @@ span.project-file {
   align-items: center;
   gap: 4px;
   font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.flow-node strong svg {
+  flex-shrink: 0;
 }
 
 .flow-node em,
@@ -2707,6 +2748,9 @@ span.project-file {
   font-size: 12px;
   font-style: normal;
   line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .flow-node-main {
@@ -2865,6 +2909,11 @@ span.project-file {
   border-radius: 12px;
   background: #fff;
   overflow: auto;
+}
+
+.flow-props .arco-select,
+.flow-props .arco-input {
+  width: 100%;
 }
 
 .flow-props h2 {
