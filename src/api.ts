@@ -181,6 +181,77 @@ export function testBot(id: string): Promise<BotTestResult> {
   return request<BotTestResult>(`/api/bots/${encodeURIComponent(id)}/test`, { method: 'POST' })
 }
 
+/* ------------------------- 流程编排 ------------------------- */
+
+import type { FlowRecord } from './workflow/model.ts'
+
+export type FlowItem = FlowRecord
+
+export type FlowStepRecord = {
+  nodeId: string
+  title: string
+  spider: string
+  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
+  startedAt: string | null
+  finishedAt: string | null
+  items: number | null
+  durationSec: number | null
+  message: string | null
+}
+
+export type FlowRunRecord = {
+  id: string
+  flowId: string
+  flowName: string
+  startedAt: string
+  finishedAt: string | null
+  status: 'running' | 'success' | 'failed'
+  durationSec: number | null
+  steps: FlowStepRecord[]
+}
+
+export function fetchFlows(): Promise<FlowItem[]> {
+  return request<FlowItem[]>('/api/flows')
+}
+
+export function createFlow(payload: { name: string; description: string; nodes: FlowItem['nodes']; edges: FlowItem['edges'] }): Promise<FlowItem> {
+  return request<FlowItem>('/api/flows', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function updateFlow(
+  id: string,
+  patch: Partial<Pick<FlowItem, 'name' | 'description' | 'nodes' | 'edges' | 'status'>>,
+): Promise<FlowItem> {
+  return request<FlowItem>(`/api/flows/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) })
+}
+
+export function deleteFlow(id: string): Promise<FlowItem> {
+  return request<FlowItem>(`/api/flows/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function runFlow(id: string): Promise<FlowRunRecord> {
+  return request<FlowRunRecord>(`/api/flows/${encodeURIComponent(id)}/run`, { method: 'POST' })
+}
+
+export function fetchFlowRuns(flowId?: string, limit = 50): Promise<FlowRunRecord[]> {
+  const query = new URLSearchParams()
+  if (flowId) query.set('flowId', flowId)
+  query.set('limit', String(limit))
+  return request<FlowRunRecord[]>(`/api/flow-runs?${query.toString()}`)
+}
+
+/** 流程运行为后台异步执行，轮询直到该次运行结束。 */
+export async function pollFlowRun(runId: string, timeoutMs = 900000, intervalMs = 2500): Promise<FlowRunRecord> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const runs = await fetchFlowRuns(undefined, 100)
+    const found = runs.find((run) => run.id === runId)
+    if (found && found.status !== 'running') return found
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  throw new Error('等待流程运行结束超时')
+}
+
 export type TaskDraftPayload = {
   name: string
   description: string

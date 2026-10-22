@@ -4,7 +4,7 @@
  * 真实逻辑：读取爬虫产出、真实运行 scrapy、真实系统指标、任务持久化。
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -120,9 +120,9 @@ function loadJson<T>(file: string, fallback: T): T {
 
 function saveJson(file: string, value: unknown): void {
   ensureDataDir()
-  fsp.writeFile(file, JSON.stringify(value, null, 2), 'utf-8').catch((error) => {
-    console.error('[api] write failed:', file, error)
-  })
+  // 必须同步写：后续紧跟的读-改-写（如运行状态推进）依赖文件已落盘，
+  // 异步写会与下一次读产生竞态导致更新丢失。
+  writeFileSync(file, JSON.stringify(value, null, 2), 'utf-8')
 }
 
 function seedTasks(): TaskRecord[] {
@@ -392,6 +392,289 @@ function finishRun(runId: string, status: RunRecord['status'], durationMs: numbe
     saveTasks(tasks)
   }
   notifyBotsOfRun(status, run?.spider ?? 'unknown', items, Number((durationMs / 1000).toFixed(1)), message)
+}
+
+/* ------------------------- 流程编排 ------------------------- */
+
+const FLOWS_FILE = path.join(DATA, 'flows.json')
+const FLOW_RUNS_FILE = path.join(DATA, 'flow-runs.json')
+
+type FlowNodeRecord = {
+  id: string
+  type: 'start' | 'script' | 'end'
+  title: string
+  x: number
+  y: number
+  project: string
+  env: string
+  command: string
+}
+
+type FlowEdgeRecord = { id: string; from: string; to: string }
+
+type FlowFlowRecord = {
+  id: string
+  name: string
+  description: string
+  status: 'draft' | 'paused' | 'saved'
+  nodes: FlowNodeRecord[]
+  edges: FlowEdgeRecord[]
+}
+
+type FlowStepRecord = {
+  nodeId: string
+  title: string
+  spider: string
+  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
+  startedAt: string | null
+  finishedAt: string | null
+  items: number | null
+  durationSec: number | null
+  message: string | null
+}
+
+type FlowRunRecord = {
+  id: string
+  flowId: string
+  flowName: string
+  startedAt: string
+  finishedAt: string | null
+  status: 'running' | 'success' | 'failed'
+  durationSec: number | null
+  steps: FlowStepRecord[]
+}
+
+const FLOW_STEP_LABEL: Record<FlowStepRecord['status'], string> = {
+  pending: '待执行',
+  running: '运行中',
+  success: '成功',
+  failed: '失败',
+  skipped: '已跳过',
+}
+
+function loadFlows(): FlowFlowRecord[] {
+  ensureDataDir()
+  if (!existsSync(FLOWS_FILE)) {
+    const seeded: FlowFlowRecord[] = [
+      {
+        id: 'flow-daily-pipeline',
+        name: '每日数据采集流水线',
+        description: '先抓取东方财富行情，再抓取一创研报（真实顺序执行）',
+        status: 'saved',
+        nodes: [
+          { id: 'flow-daily-pipeline-start', type: 'start', title: '开始', x: 120, y: 190, project: '', env: '', command: '' },
+          {
+            id: 'flow-daily-pipeline-script-1',
+            type: 'script',
+            title: '东方财富行情',
+            x: 380,
+            y: 160,
+            project: 'eastmoney_stock',
+            env: 'scrapy_env',
+            command: 'scrapy crawl eastmoney_stock -O ../data/eastmoney_600519_kline.json -O ../data/eastmoney_600519_kline.csv',
+          },
+          {
+            id: 'flow-daily-pipeline-script-2',
+            type: 'script',
+            title: '一创研报',
+            x: 660,
+            y: 160,
+            project: 'fcfco_reports',
+            env: 'scrapy_env',
+            command: 'scrapy crawl fcfco_reports -O ../data/fcfco_reports.json',
+          },
+          { id: 'flow-daily-pipeline-end', type: 'end', title: '结束', x: 940, y: 190, project: '', env: '', command: '' },
+        ],
+        edges: [
+          { id: 'flow-daily-pipeline-e1', from: 'flow-daily-pipeline-start', to: 'flow-daily-pipeline-script-1' },
+          { id: 'flow-daily-pipeline-e2', from: 'flow-daily-pipeline-script-1', to: 'flow-daily-pipeline-script-2' },
+          { id: 'flow-daily-pipeline-e3', from: 'flow-daily-pipeline-script-2', to: 'flow-daily-pipeline-end' },
+        ],
+      },
+    ]
+    saveJson(FLOWS_FILE, seeded)
+    return seeded
+  }
+  return loadJson<FlowFlowRecord[]>(FLOWS_FILE, [])
+}
+
+function saveFlows(flows: FlowFlowRecord[]): void {
+  saveJson(FLOWS_FILE, flows)
+}
+
+function loadFlowRuns(): FlowRunRecord[] {
+  return loadJson<FlowRunRecord[]>(FLOW_RUNS_FILE, [])
+}
+
+function saveFlowRuns(runs: FlowRunRecord[]): void {
+  saveJson(FLOW_RUNS_FILE, runs.slice(0, 100))
+}
+
+function updateFlowRun(runId: string, mutate: (run: FlowRunRecord) => void): void {
+  const runs = loadFlowRuns()
+  const run = runs.find((item) => item.id === runId)
+  if (!run) return
+  mutate(run)
+  saveFlowRuns(runs)
+}
+
+/** 从开始节点沿连线深度优先，得到脚本节点执行顺序。 */
+function orderedScriptNodes(flow: FlowFlowRecord): FlowNodeRecord[] {
+  const start = flow.nodes.find((node) => node.type === 'start')
+  if (!start) return flow.nodes.filter((node) => node.type === 'script')
+  const visited = new Set<string>()
+  const order: FlowNodeRecord[] = []
+  const walk = (id: string) => {
+    if (visited.has(id)) return
+    visited.add(id)
+    const node = flow.nodes.find((item) => item.id === id)
+    if (!node) return
+    if (node.type === 'script') order.push(node)
+    for (const edge of flow.edges.filter((item) => item.from === id)) walk(edge.to)
+  }
+  walk(start.id)
+  return order
+}
+
+const runningFlows = new Set<string>()
+
+/** 单次真实运行一个爬虫（供流程步骤使用），等待进程退出并统计产出。 */
+function runSpiderOnce(meta: SpiderMeta): Promise<{ ok: boolean; items: number | null; durationSec: number; message: string | null }> {
+  return new Promise((resolve) => {
+    const started = Date.now()
+    const args = ['crawl', meta.name]
+    for (const output of meta.outputs) args.push('-O', `../data/${output}`)
+    const child = spawn(SCRAPY, args, { cwd: CRAWLERS, windowsHide: true })
+    let stderrTail = ''
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderrTail = (stderrTail + chunk.toString()).slice(-2000)
+    })
+    child.on('error', (error) => {
+      resolve({ ok: false, items: null, durationSec: 0, message: String(error) })
+    })
+    child.on('close', (code) => {
+      const primary = meta.outputs.find((file) => file.endsWith('.json'))
+      const items = primary ? countItems(primary) : null
+      const ok = code === 0
+      resolve({
+        ok,
+        items,
+        durationSec: Number(((Date.now() - started) / 1000).toFixed(1)),
+        message: ok ? null : (stderrTail.split('\n').filter(Boolean).pop() ?? `exit code ${code}`),
+      })
+    })
+  })
+}
+
+function startFlowRun(flow: FlowFlowRecord): FlowRunRecord | { error: string } {
+  if (runningFlows.has(flow.id)) {
+    return { error: '该流程正在运行中' }
+  }
+  const scriptNodes = orderedScriptNodes(flow)
+  if (!scriptNodes.length) {
+    return { error: '流程中没有脚本节点（或开始节点未连到任何脚本）' }
+  }
+  const run: FlowRunRecord = {
+    id: `frun-${Date.now()}`,
+    flowId: flow.id,
+    flowName: flow.name,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    status: 'running',
+    durationSec: null,
+    steps: scriptNodes.map((node) => ({
+      nodeId: node.id,
+      title: node.title,
+      spider: node.project,
+      status: 'pending',
+      startedAt: null,
+      finishedAt: null,
+      items: null,
+      durationSec: null,
+      message: null,
+    })),
+  }
+  const runs = loadFlowRuns()
+  runs.unshift(run)
+  saveFlowRuns(runs)
+  runningFlows.add(flow.id)
+  void runFlowSteps(run.id, flow.id)
+  return run
+}
+
+async function runFlowSteps(runId: string, flowId: string): Promise<void> {
+  let ok = true
+  const persisted = loadFlowRuns().find((item) => item.id === runId)
+  const total = persisted?.steps.length ?? 0
+  for (let index = 0; index < total; index += 1) {
+    let meta: SpiderMeta | undefined
+    updateFlowRun(runId, (run) => {
+      meta = SPIDERS.find((item) => item.name === run.steps[index].spider)
+      run.steps[index].status = 'running'
+      run.steps[index].startedAt = new Date().toISOString()
+    })
+    if (!meta) {
+      updateFlowRun(runId, (run) => {
+        run.steps[index].status = 'failed'
+        run.steps[index].message = '节点未关联真实爬虫（项目需选择 eastmoney_stock 或 fcfco_reports）'
+      })
+      ok = false
+      break
+    }
+    if (running.has(meta.name)) {
+      updateFlowRun(runId, (run) => {
+        run.steps[index].status = 'failed'
+        run.steps[index].message = '该爬虫正在其他任务中运行'
+      })
+      ok = false
+      break
+    }
+    const result = await runSpiderOnce(meta)
+    updateFlowRun(runId, (run) => {
+      const step = run.steps[index]
+      step.status = result.ok ? 'success' : 'failed'
+      step.finishedAt = new Date().toISOString()
+      step.durationSec = result.durationSec
+      step.items = result.items
+      step.message = result.message
+    })
+    if (!result.ok) {
+      ok = false
+      break
+    }
+  }
+  updateFlowRun(runId, (run) => {
+    for (const step of run.steps) {
+      if (step.status === 'pending') step.status = 'skipped'
+    }
+    run.status = ok ? 'success' : 'failed'
+    run.finishedAt = new Date().toISOString()
+    run.durationSec = Number(((new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()) / 1000).toFixed(1))
+  })
+  runningFlows.delete(flowId)
+  const runs = loadFlowRuns()
+  const finished = runs.find((item) => item.id === runId)
+  if (finished) notifyBotsOfFlowRun(finished)
+}
+
+function notifyBotsOfFlowRun(run: FlowRunRecord): void {
+  const bots = loadBots().filter((bot) => bot.enabled && (!bot.onlyFailed || run.status === 'failed'))
+  if (!bots.length) return
+  const stepLines = run.steps
+    .map((step) => `  · ${step.title}：${FLOW_STEP_LABEL[step.status]}（${step.items ?? '—'} 条，${step.durationSec ?? '—'}s）`)
+    .join('\n')
+  const text = [
+    '【ScrapyWeb】流程运行通知',
+    `流程：${run.flowName}`,
+    `状态：${run.status === 'success' ? '✅ 成功' : '❌ 失败'}`,
+    stepLines,
+    `时间：${formatStampLocal()}`,
+  ].join('\n')
+  for (const bot of bots) {
+    void sendToBot(bot, text).then((result) => {
+      if (!result.ok) console.warn(`[api] bot ${bot.name}(${bot.type}) 流程通知失败: ${result.message}`)
+    })
+  }
 }
 
 /* ------------------------- 产出文件 ------------------------- */
@@ -740,6 +1023,87 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
     const text = `【ScrapyWeb】测试消息\n这是一条来自机器人配置页的测试推送。\n时间：${formatStampLocal()}`
     const result = await sendToBot(bot, text)
     sendJson(res, 200, result)
+    return true
+  }
+
+  /* ------------------------- 流程编排 ------------------------- */
+
+  if (pathname === '/api/flows' && method === 'GET') {
+    sendJson(res, 200, loadFlows())
+    return true
+  }
+
+  if (pathname === '/api/flows' && method === 'POST') {
+    const body = await readBody(req)
+    const name = String(body.name ?? '').trim() || '未命名流程'
+    const flow: FlowFlowRecord = {
+      id: `flow-${Date.now()}`,
+      name,
+      description: String(body.description ?? ''),
+      status: 'draft',
+      nodes: Array.isArray(body.nodes) ? (body.nodes as FlowFlowRecord['nodes']) : [],
+      edges: Array.isArray(body.edges) ? (body.edges as FlowFlowRecord['edges']) : [],
+    }
+    const flows = loadFlows()
+    flows.unshift(flow)
+    saveFlows(flows)
+    sendJson(res, 200, flow)
+    return true
+  }
+
+  const flowMatch = /^\/api\/flows\/([^/]+)$/.exec(pathname)
+  if (flowMatch) {
+    const id = decodeURIComponent(flowMatch[1])
+    const flows = loadFlows()
+    const index = flows.findIndex((flow) => flow.id === id)
+    if (index === -1) {
+      sendJson(res, 404, { error: '流程不存在' })
+      return true
+    }
+    if (method === 'PUT') {
+      const body = await readBody(req)
+      const flow = flows[index]
+      if (typeof body.name === 'string' && body.name.trim()) flow.name = body.name.trim()
+      if (typeof body.description === 'string') flow.description = body.description
+      if (body.status === 'draft' || body.status === 'paused' || body.status === 'saved') flow.status = body.status
+      if (Array.isArray(body.nodes)) flow.nodes = body.nodes as FlowFlowRecord['nodes']
+      if (Array.isArray(body.edges)) flow.edges = body.edges as FlowFlowRecord['edges']
+      saveFlows(flows)
+      sendJson(res, 200, flow)
+      return true
+    }
+    if (method === 'DELETE') {
+      const [removed] = flows.splice(index, 1)
+      saveFlows(flows)
+      sendJson(res, 200, removed)
+      return true
+    }
+  }
+
+  const flowRunMatch = /^\/api\/flows\/([^/]+)\/run$/.exec(pathname)
+  if (flowRunMatch && method === 'POST') {
+    const id = decodeURIComponent(flowRunMatch[1])
+    const flow = loadFlows().find((item) => item.id === id)
+    if (!flow) {
+      sendJson(res, 404, { error: '流程不存在' })
+      return true
+    }
+    const result = startFlowRun(flow)
+    if ('error' in result) {
+      sendJson(res, 409, result)
+      return true
+    }
+    sendJson(res, 200, result)
+    return true
+  }
+
+  if (pathname === '/api/flow-runs' && method === 'GET') {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const flowId = url.searchParams.get('flowId')
+    const limit = Number(url.searchParams.get('limit') ?? 50)
+    let runs = loadFlowRuns()
+    if (flowId) runs = runs.filter((run) => run.flowId === flowId)
+    sendJson(res, 200, runs.slice(0, Number.isFinite(limit) ? limit : 50))
     return true
   }
 

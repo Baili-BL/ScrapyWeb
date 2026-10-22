@@ -2459,6 +2459,31 @@ span.project-file {
   font-size: 12px;
 }
 
+.flow-steps {
+  color: rgb(28, 31, 35) !important;
+  font-family: monospace;
+  font-size: 12px !important;
+}
+
+.flow-lastrun {
+  color: rgb(150, 156, 168) !important;
+  font-size: 12px !important;
+}
+
+.flow-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.flow-run-hint {
+  margin: 4px 0 0;
+  color: #86909c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .flow-screen {
   position: fixed;
   inset: 0;

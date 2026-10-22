@@ -49,17 +49,26 @@ export function blankFlow(id: string, name = '未命名流程'): FlowRecord {
   }
 }
 
-export const SEED_FLOWS: FlowRecord[] = [
-  {
-    ...blankFlow('sample', '编排流程代码样例'),
-    description: '编排流程代码样例，一些代码参考',
-    status: 'paused',
-  },
-]
-
-let flowSeq = 1
-
-export function nextFlowId() {
-  flowSeq += 1
-  return `flow-${flowSeq}`
+/** 从开始节点沿连线深度优先，得到脚本节点（爬虫）执行顺序。 */
+export function orderedScriptNodes(flow: FlowRecord): FlowNode[] {
+  const start = flow.nodes.find((node) => node.type === 'start')
+  if (!start) return flow.nodes.filter((node) => node.type === 'script')
+  const visited = new Set<string>()
+  const order: FlowNode[] = []
+  const walk = (id: string) => {
+    if (visited.has(id)) return
+    visited.add(id)
+    const node = flow.nodes.find((item) => item.id === id)
+    if (!node) return
+    if (node.type === 'script') order.push(node)
+    for (const edge of flow.edges.filter((item) => item.from === id)) walk(edge.to)
+  }
+  walk(start.id)
+  return order
 }
+
+/** 可真实运行的爬虫（与后端注册表一致）。 */
+export const SPIDER_OPTIONS = [
+  { value: 'eastmoney_stock', label: 'eastmoney_stock（东方财富行情）' },
+  { value: 'fcfco_reports', label: 'fcfco_reports（一创研报）' },
+]

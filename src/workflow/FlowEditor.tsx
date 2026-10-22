@@ -14,10 +14,10 @@ import {
 } from '@arco-design/web-react/icon'
 import { useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { nodeSize } from './model.ts'
+import { runFlow, pollFlowRun } from '../api.ts'
+import { nodeSize, orderedScriptNodes, SPIDER_OPTIONS } from './model.ts'
 import type { FlowEdge, FlowNode, FlowNodeType, FlowRecord } from './model.ts'
 
-const PROJECTS = ['eastmoney_stock', 'fcfco_reports', 'requests_project', '编排流程代码样例']
 const ENVS = ['scrapy_env', 'requests_env']
 
 function cloneFlow(flow: FlowRecord): FlowRecord {
@@ -43,8 +43,8 @@ export function FlowEditor({
   onNotify,
 }: {
   flow: FlowRecord
-  onBack: (flow: FlowRecord) => void
-  onSave: (flow: FlowRecord) => void
+  onBack: (flow: FlowRecord) => Promise<void> | void
+  onSave: (flow: FlowRecord) => Promise<void> | void
   onNotify: (text: string) => void
 }) {
   const origin = useRef(cloneFlow(flow))
@@ -58,6 +58,8 @@ export function FlowEditor({
   const [locked, setLocked] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
+  const [saveBusy, setSaveBusy] = useState(false)
+  const [runBusy, setRunBusy] = useState(false)
   const stageRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null)
   const panRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
@@ -164,6 +166,45 @@ export function FlowEditor({
     setLinkFrom(null)
   }
 
+  const handleSave = async () => {
+    setSaveBusy(true)
+    try {
+      const savedFlow = { ...current(), status: 'saved' as const }
+      await onSave(savedFlow)
+      origin.current = cloneFlow(savedFlow)
+    } finally {
+      setSaveBusy(false)
+    }
+  }
+
+  const handleRun = async () => {
+    const scripts = orderedScriptNodes(current())
+    if (!scripts.length) {
+      onNotify('流程中没有脚本节点：请添加脚本节点并从「开始」连出')
+      return
+    }
+    const unknown = scripts.find((node) => !SPIDER_OPTIONS.some((option) => option.value === node.project))
+    if (unknown) {
+      onNotify(`节点「${unknown.title}」的项目需选择真实爬虫（eastmoney_stock 或 fcfco_reports）才能运行`)
+      return
+    }
+    setRunBusy(true)
+    try {
+      await onSave(current())
+      const started = await runFlow(flow.id)
+      const run = started.status === 'running' ? await pollFlowRun(started.id) : started
+      onNotify(
+        run.status === 'success'
+          ? `流程运行成功：${run.steps.map((step) => `${step.title} ${step.items ?? '—'}条`).join('，')}`
+          : `流程运行失败：${run.steps.find((step) => step.status === 'failed')?.message ?? '未知原因'}`,
+      )
+    } catch (error) {
+      onNotify(`流程运行失败：${(error as Error).message}`)
+    } finally {
+      setRunBusy(false)
+    }
+  }
+
   const paths = useMemo(
     () =>
       edges
@@ -207,18 +248,15 @@ export function FlowEditor({
           <button
             type="button"
             className="flow-ghost"
-            onClick={() => {
-              const next = { ...current(), status: 'saved' as const }
-              origin.current = cloneFlow(next)
-              onSave(next)
-            }}
+            disabled={saveBusy}
+            onClick={() => void handleSave()}
           >
             <IconSave />
-            保存
+            {saveBusy ? '保存中…' : '保存'}
           </button>
-          <button type="button" className="task-create" onClick={() => onNotify(`已运行 ${name.trim() || '未命名流程'}`)}>
+          <button type="button" className="task-create" disabled={runBusy} onClick={() => void handleRun()}>
             <IconPlayArrow />
-            运行
+            {runBusy ? '运行中…' : '运行'}
           </button>
         </div>
       </header>
@@ -331,12 +369,12 @@ export function FlowEditor({
               {selected.type === 'script' ? (
                 <>
                   <label>
-                    <span>项目</span>
+                    <span>项目（爬虫）</span>
                     <Select
                       placeholder="未配置"
                       allowClear
                       value={selected.project || undefined}
-                      options={PROJECTS}
+                      options={SPIDER_OPTIONS}
                       onChange={(value) => updateNode(selected.id, { project: value ? String(value) : '' })}
                     />
                   </label>
@@ -351,13 +389,14 @@ export function FlowEditor({
                     />
                   </label>
                   <label>
-                    <span>命令</span>
+                    <span>备注命令</span>
                     <Input
                       value={selected.command}
-                      placeholder="python src/test1.py"
+                      placeholder="scrapy crawl ..."
                       onChange={(value) => updateNode(selected.id, { command: value })}
                     />
                   </label>
+                  <p className="flow-run-hint">运行时将按连线顺序真实执行所选爬虫（scrapy crawl）。</p>
                 </>
               ) : null}
               <button type="button" className="flow-delete" onClick={removeSelected}>
