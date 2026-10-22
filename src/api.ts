@@ -433,6 +433,37 @@ export function probeRemoteNode(id: string): Promise<{ status: RemoteNodeItem['l
   })
 }
 
+/* ------------------------- Python 解释器 ------------------------- */
+
+export type PythonInterpreter = {
+  version: string
+  path: string
+  source: 'venv' | 'system' | 'PATH'
+  scrapyVersion: string
+  inUse: boolean
+  isDefault: boolean
+}
+
+export type PythonsPayload = { interpreters: PythonInterpreter[]; venvPath: string }
+
+export function fetchPythons(): Promise<PythonsPayload> {
+  return request<PythonsPayload>('/api/pythons')
+}
+
+export function verifyPython(interpreterPath: string): Promise<{ ok: boolean; version: string | null; latencyMs: number; message?: string }> {
+  return request<{ ok: boolean; version: string | null; latencyMs: number; message?: string }>('/api/pythons/verify', {
+    method: 'POST',
+    body: JSON.stringify({ path: interpreterPath }),
+  })
+}
+
+export function setDefaultPython(interpreterPath: string): Promise<{ ok: boolean; defaultPath: string }> {
+  return request<{ ok: boolean; defaultPath: string }>('/api/pythons/default', {
+    method: 'PUT',
+    body: JSON.stringify({ path: interpreterPath }),
+  })
+}
+
 export type TaskDraftPayload = {
   name: string
   description: string

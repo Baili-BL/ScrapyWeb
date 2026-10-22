@@ -979,6 +979,87 @@ async function buildNodesPayload() {
   }
 }
 
+/* ------------------------- Python 解释器检测 ------------------------- */
+
+const PY_DEFAULT_FILE = path.join(DATA, 'python-default.json')
+
+type DetectedPython = {
+  version: string
+  path: string
+  source: 'venv' | 'system' | 'PATH'
+  scrapyVersion: string
+  inUse: boolean
+  isDefault: boolean
+}
+
+async function detectPythons(): Promise<DetectedPython[]> {
+  const found: Array<{ version: string; path: string; source: DetectedPython['source']; scrapyVersion: string }> = []
+  const pushUnique = (entry: { version: string; path: string; source: DetectedPython['source']; scrapyVersion?: string }) => {
+    if (!found.some((item) => item.path.toLowerCase() === entry.path.toLowerCase())) {
+      found.push({ ...entry, scrapyVersion: entry.scrapyVersion ?? '' })
+    }
+  }
+
+  // 工程虚拟环境（任务实际使用的解释器）
+  const venvPython = path.join(ROOT, '.venv', 'Scripts', 'python.exe')
+  if (existsSync(venvPython)) {
+    let version = '未知'
+    let scrapyVersion = ''
+    try {
+      const { stdout } = await execFileAsync(venvPython, ['--version'], { timeout: 10000 })
+      version = stdout.trim().replace(/^Python\s+/i, '')
+    } catch {
+      // 忽略，保持未知
+    }
+    try {
+      const { stdout } = await execFileAsync(venvPython, ['-c', 'import scrapy;print(scrapy.__version__)'], { timeout: 15000 })
+      scrapyVersion = stdout.trim()
+    } catch {
+      scrapyVersion = ''
+    }
+    pushUnique({ version, path: venvPython, source: 'venv', scrapyVersion })
+  }
+
+  // py 启动器枚举系统安装的解释器（Windows 标准行为）
+  try {
+    const { stdout } = await execFileAsync('py', ['-0p'], { timeout: 10000 })
+    for (const line of stdout.split(/\r?\n/)) {
+      const match = /(-V:\d+\.\d+(?:\.\d+)?)\s+(\*)?\s*(.+python\.exe)/i.exec(line)
+      if (match) {
+        pushUnique({ version: match[1].replace('-V:', ''), path: match[3].trim(), source: 'system' })
+      }
+    }
+  } catch {
+    // py 启动器不存在时跳过
+  }
+
+  // PATH 上的 python
+  try {
+    const { stdout } = await execFileAsync('python', ['--version'], { timeout: 10000 })
+    const version = stdout.trim().replace(/^Python\s+/i, '')
+    try {
+      const where = await execFileAsync('where', ['python'], { timeout: 10000 })
+      for (const candidate of where.stdout.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) {
+        pushUnique({ version, path: candidate, source: 'PATH' })
+      }
+    } catch {
+      // where 不可用时忽略
+    }
+  } catch {
+    // PATH 上没有 python
+  }
+
+  const defaultConfig = loadJson<{ path?: string }>(PY_DEFAULT_FILE, {})
+  const inUsePath = venvPython.toLowerCase()
+  return found.map((item) => ({
+    ...item,
+    inUse: item.path.toLowerCase() === inUsePath,
+    isDefault: defaultConfig.path
+      ? item.path.toLowerCase() === defaultConfig.path.toLowerCase()
+      : item.source === 'venv',
+  }))
+}
+
 /* ------------------------- HTTP 工具 ------------------------- */
 
 function sendJson(res: import('node:http').ServerResponse, status: number, payload: unknown): void {
@@ -1435,6 +1516,55 @@ async function handleApi(req: import('node:http').IncomingMessage, res: import('
     node.lastStatus = online ? 'connected' : 'disconnected'
     saveRemoteNodes(nodes)
     sendJson(res, 200, { status: node.lastStatus, lastProbeAt: node.lastProbeAt })
+    return true
+  }
+
+  /* ------------------------- Python 解释器 ------------------------- */
+
+  if (pathname === '/api/pythons' && method === 'GET') {
+    const interpreters = await detectPythons()
+    sendJson(res, 200, {
+      interpreters,
+      venvPath: path.join(ROOT, '.venv', 'Scripts', 'python.exe'),
+    })
+    return true
+  }
+
+  if (pathname === '/api/pythons/verify' && method === 'POST') {
+    const body = await readBody(req)
+    const interpreterPath = String(body.path ?? '').trim()
+    if (!interpreterPath) {
+      sendJson(res, 400, { error: '缺少解释器路径' })
+      return true
+    }
+    const started = Date.now()
+    try {
+      const { stdout } = await execFileAsync(interpreterPath, ['--version'], { timeout: 10000 })
+      sendJson(res, 200, {
+        ok: true,
+        version: stdout.trim().replace(/^Python\s+/i, ''),
+        latencyMs: Date.now() - started,
+      })
+    } catch (error) {
+      sendJson(res, 200, {
+        ok: false,
+        version: null,
+        latencyMs: Date.now() - started,
+        message: String(error).slice(0, 300),
+      })
+    }
+    return true
+  }
+
+  if (pathname === '/api/pythons/default' && method === 'PUT') {
+    const body = await readBody(req)
+    const interpreterPath = String(body.path ?? '').trim()
+    if (!interpreterPath || !existsSync(interpreterPath)) {
+      sendJson(res, 400, { error: '解释器路径不存在' })
+      return true
+    }
+    saveJson(PY_DEFAULT_FILE, { path: interpreterPath, updatedAt: new Date().toISOString() })
+    sendJson(res, 200, { ok: true, defaultPath: interpreterPath })
     return true
   }
 

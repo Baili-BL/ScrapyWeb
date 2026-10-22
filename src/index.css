@@ -1899,6 +1899,129 @@ select {
   padding-top: 12px;
 }
 
+/* ------------------------- 技术文档 ------------------------- */
+
+.docs-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .docs-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.docs-toc {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid rgb(234, 237, 241);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.docs-toc-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgb(28, 31, 35);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 8px 10px;
+}
+
+.docs-toc-link {
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: rgb(78, 89, 105);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.docs-toc-link:hover {
+  background: #f7f8fa;
+  color: rgb(28, 31, 35);
+}
+
+.docs-toc-link.on {
+  background: #e8f0ff;
+  color: #165dff;
+  font-weight: 500;
+}
+
+.docs-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.docs-section h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.docs-p {
+  margin: 0 0 10px;
+  color: rgb(78, 89, 105);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.docs-list {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  color: rgb(78, 89, 105);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.docs-code {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #1d2129;
+  color: #c9d4e3;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow: auto;
+}
+
+.docs-table-wrap {
+  overflow: auto;
+  border: 1px solid rgb(234, 237, 241);
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.docs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.docs-table th,
+.docs-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f2f3f5;
+  text-align: left;
+  color: rgb(78, 89, 105);
+}
+
+.docs-table th {
+  background: #fafbfc;
+  color: rgb(28, 31, 35);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .cron-help {
   margin-top: 8px;
   color: rgb(115, 122, 135);

@@ -1,6 +1,7 @@
 import { Dropdown, Menu, Tooltip } from '@arco-design/web-react'
 import {
   IconApps,
+  IconBook,
   IconBranch,
   IconCode,
   IconCommon,
@@ -51,6 +52,7 @@ const ICONS: Record<string, ReactNode> = {
   python: <IconCode />,
   nodes: <IconMindMapping />,
   users: <IconUser />,
+  docs: <IconBook />,
   logs: <IconFile />,
   'ai-assistant': <IconMessage />,
   'ai-config': <IconLink />,

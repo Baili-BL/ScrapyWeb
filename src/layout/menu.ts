@@ -7,6 +7,7 @@ export type MenuKey =
   | 'python'
   | 'nodes'
   | 'users'
+  | 'docs'
   | 'logs'
   | 'ai-assistant'
   | 'ai-config'
@@ -51,6 +52,7 @@ export const MENU_GROUPS: MenuGroup[] = [
   {
     title: '其他',
     items: [
+      { key: 'docs', label: '技术文档' },
       {
         key: 'settings',
         label: '系统设置',
@@ -72,6 +74,7 @@ export const MENU_PATHS: Record<MenuKey, string> = {
   python: '/python',
   nodes: '/nodes',
   users: '/users',
+  docs: '/docs',
   logs: '/logs',
   'ai-assistant': '/ai/assistant',
   'ai-config': '/ai/config',

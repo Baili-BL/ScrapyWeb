@@ -1,12 +1,12 @@
-import { Button, Form, Input, Switch, Table, Tag } from '@arco-design/web-react'
-import type { ColumnProps } from '@arco-design/web-react/es/Table'
+import { Button, Form, Input, Switch } from '@arco-design/web-react'
 import { useState } from 'react'
-import { NODE } from '../data.ts'
 import { AiAssistant } from '../ai/AiAssistant.tsx'
 import { AiConfigPage } from '../ai/AiConfigPage.tsx'
 import { BotConfig } from '../bots/BotConfig.tsx'
 import { LogList } from '../logs/LogList.tsx'
 import { UserAdmin } from '../users/UserAdmin.tsx'
+import { PythonVersions } from '../python/PythonVersions.tsx'
+import { TechDocs } from '../docs/TechDocs.tsx'
 import { NodeList } from '../nodes/NodeList.tsx'
 import { EnvList } from '../envs/EnvList.tsx'
 import { ProjectList } from '../projects/ProjectList.tsx'
@@ -14,41 +14,6 @@ import { TaskList } from '../tasks/TaskList.tsx'
 import { FlowList } from '../workflow/FlowList.tsx'
 import { menuLabel } from './menu.ts'
 import type { MenuKey } from './menu.ts'
-
-type Row = Record<string, string | number>
-
-function StatusTag({ value }: { value: string }) {
-  const color = value === '运行中' || value === '在线' || value === '当前使用' ? 'green' : value === '已暂停' ? 'orange' : 'gray'
-  return <Tag color={color}>{value}</Tag>
-}
-
-function DataCard({
-  title,
-  desc,
-  columns,
-  rows,
-}: {
-  title: string
-  desc: string
-  columns: ColumnProps<Row>[]
-  rows: Row[]
-}) {
-  return (
-    <div className="page">
-      <div className="page-inner">
-        <header className="page-header">
-          <div className="brand-text">
-            <h1>{title}</h1>
-            <p>{desc}</p>
-          </div>
-        </header>
-        <section className="panel">
-          <Table rowKey="id" columns={columns} data={rows} pagination={false} border={false} />
-        </section>
-      </div>
-    </div>
-  )
-}
 
 export function ModulePage({
   menuKey,
@@ -77,22 +42,11 @@ export function ModulePage({
   }
 
   if (menuKey === 'python') {
-    return (
-      <DataCard
-        title="Python版本"
-        desc="节点上可用的 Python 解释器"
-        columns={[
-          { title: '版本', dataIndex: 'name' },
-          { title: '节点', dataIndex: 'node' },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            render: (value) => <StatusTag value={String(value)} />,
-          },
-        ]}
-        rows={[{ id: 'py311', name: `Python ${NODE.python}`, node: NODE.name, status: '当前使用' }]}
-      />
-    )
+    return <PythonVersions onNotify={onSaved} />
+  }
+
+  if (menuKey === 'docs') {
+    return <TechDocs />
   }
 
   if (menuKey === 'nodes') {
