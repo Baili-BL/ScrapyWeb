@@ -12,7 +12,7 @@ import {
   IconStop,
   IconUnlock,
 } from '@arco-design/web-react/icon'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { runFlow, pollFlowRun } from '../api.ts'
 import { nodeSize, orderedScriptNodes, SPIDER_META, SPIDER_OPTIONS } from './model.ts'
@@ -56,6 +56,8 @@ export function FlowEditor({
   const [locked, setLocked] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
+  const [linkPoint, setLinkPoint] = useState<{ x: number; y: number } | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState('')
   const [saveBusy, setSaveBusy] = useState(false)
   const [runBusy, setRunBusy] = useState(false)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -79,6 +81,8 @@ export function FlowEditor({
     setEdges(next.edges.map((edge) => ({ ...edge })))
     setSelectedId(next.nodes[0]?.id ?? '')
     setLinkFrom(null)
+    setLinkPoint(null)
+    setSelectedEdgeId('')
   }
 
   const updateNode = (id: string, patch: Partial<FlowNode>) => {
@@ -116,6 +120,7 @@ export function FlowEditor({
 
   const onNodePointerDown = (event: ReactPointerEvent<HTMLDivElement>, node: FlowNode) => {
     setSelectedId(node.id)
+    setSelectedEdgeId('')
     if (locked) return
     const rect = stageRef.current?.getBoundingClientRect()
     if (!rect) return
@@ -139,7 +144,9 @@ export function FlowEditor({
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget && !(event.target instanceof SVGElement)) return
     setSelectedId('')
+    setSelectedEdgeId('')
     setLinkFrom(null)
+    setLinkPoint(null)
     if (locked) return
     panRef.current = { x: pan.x, y: pan.y, px: event.clientX, py: event.clientY }
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -151,19 +158,62 @@ export function FlowEditor({
     setPan({ x: panDrag.x + event.clientX - panDrag.px, y: panDrag.y + event.clientY - panDrag.py })
   }
 
-  const connectFrom = (event: ReactPointerEvent<HTMLButtonElement>, node: FlowNode, side: 'in' | 'out') => {
+  const stageCoords = (clientX: number, clientY: number) => {
+    const rect = stageRef.current?.getBoundingClientRect()
+    if (!rect) return { x: 0, y: 0 }
+    return { x: (clientX - rect.left) / zoom, y: (clientY - rect.top) / zoom }
+  }
+
+  const addEdge = (from: string, to: string) => {
+    if (from === to) return
+    setEdges((list) => {
+      if (list.some((edge) => edge.from === from && edge.to === to)) return list
+      return [...list, { id: `${flow.id}-e-${Date.now()}`, from, to }]
+    })
+  }
+
+  const removeEdge = (edgeId: string) => {
+    setEdges((list) => list.filter((edge) => edge.id !== edgeId))
+    if (selectedEdgeId === edgeId) setSelectedEdgeId('')
+    onNotify('已删除连线')
+  }
+
+  /** 输出端口按下：进入连线模式（支持拖拽到目标端口，也支持点选）。 */
+  const onPortPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, node: FlowNode, side: 'in' | 'out') => {
     event.stopPropagation()
     setSelectedId(node.id)
+    setSelectedEdgeId('')
     if (side === 'out') {
       setLinkFrom(node.id)
+      setLinkPoint(stageCoords(event.clientX, event.clientY))
+      event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
-    if (!linkFrom || linkFrom === node.id) return
-    setEdges((list) => {
-      if (list.some((edge) => edge.from === linkFrom && edge.to === node.id)) return list
-      return [...list, { id: `${flow.id}-e-${Date.now()}`, from: linkFrom, to: node.id }]
-    })
+    if (linkFrom && linkFrom !== node.id) {
+      addEdge(linkFrom, node.id)
+      onNotify('已连线')
+    }
     setLinkFrom(null)
+    setLinkPoint(null)
+  }
+
+  const onPortPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!linkFrom) return
+    setLinkPoint(stageCoords(event.clientX, event.clientY))
+  }
+
+  const onPortPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!linkFrom) return
+    const target = document.elementFromPoint(event.clientX, event.clientY)
+    const portEl = target?.closest('[data-port-in]')
+    const nodeEl = target?.closest('[data-node-id]')
+    const targetId = portEl?.getAttribute('data-port-in') ?? nodeEl?.getAttribute('data-node-id')
+    if (targetId && targetId !== linkFrom) {
+      addEdge(linkFrom, targetId)
+      onNotify('已连线')
+    }
+    setLinkFrom(null)
+    setLinkPoint(null)
   }
 
   const handleSave = async () => {
@@ -205,6 +255,56 @@ export function FlowEditor({
     }
   }
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setLinkFrom(null)
+        setLinkPoint(null)
+        setSelectedEdgeId('')
+        return
+      }
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+      if (selectedEdgeId) {
+        event.preventDefault()
+        removeEdge(selectedEdgeId)
+        return
+      }
+      if (selected?.type === 'script') {
+        event.preventDefault()
+        removeSelected()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
+
+  const autoLayout = () => {
+    const scripts = orderedScriptNodes(current())
+    const next = nodes.map((node) => ({ ...node }))
+    const startY = 180
+    const startNode = next.find((node) => node.type === 'start')
+    if (startNode) {
+      startNode.x = 120
+      startNode.y = startY
+    }
+    scripts.forEach((script, index) => {
+      const target = next.find((node) => node.id === script.id)
+      if (target) {
+        target.x = 380 + index * 280
+        target.y = startY - 24
+      }
+    })
+    const endNode = next.find((node) => node.type === 'end')
+    if (endNode) {
+      endNode.x = 380 + scripts.length * 280 + 40
+      endNode.y = startY
+    }
+    setNodes(next)
+    onNotify('已按执行顺序自动排布，保存后生效')
+  }
+
   const paths = useMemo(
     () =>
       edges
@@ -215,18 +315,26 @@ export function FlowEditor({
           const start = portPoint(from, 'out')
           const end = portPoint(to, 'in')
           const mid = (start.x + end.x) / 2
-          return { id: edge.id, d: `M ${start.x} ${start.y} C ${mid} ${start.y}, ${mid} ${end.y}, ${end.x} ${end.y}` }
+          return {
+            id: edge.id,
+            from: from.title,
+            to: to.title,
+            d: `M ${start.x} ${start.y} C ${mid} ${start.y}, ${mid} ${end.y}, ${end.x} ${end.y}`,
+          }
         })
-        .filter((item): item is { id: string; d: string } => item !== null),
+        .filter((item): item is { id: string; from: string; to: string; d: string } => item !== null),
     [edges, nodes],
   )
+
+  const linkSource = linkFrom ? nodes.find((node) => node.id === linkFrom) ?? null : null
+  const linkSourcePoint = linkSource ? portPoint(linkSource, 'out') : null
 
   return (
     <div className="flow-screen">
       <header className="flow-top">
         <div>
           <h1>{name.trim() || '未命名流程'}</h1>
-          <p>从左侧拖入脚本节点，连接各节点形成流程。</p>
+          <p>选择爬虫节点并连线成流程：从输出圆点拖到目标节点即可连线。</p>
         </div>
         <div className="flow-actions">
           <button type="button" className="flow-back" onClick={() => onBack(current())}>
@@ -244,6 +352,9 @@ export function FlowEditor({
           >
             <IconRefresh />
             刷新
+          </button>
+          <button type="button" className="flow-ghost" onClick={autoLayout}>
+            自动排布
           </button>
           <button
             type="button"
@@ -286,8 +397,30 @@ export function FlowEditor({
             >
               <svg className="flow-edges" width="1600" height="900">
                 {paths.map((path) => (
-                  <path key={path.id} d={path.d} />
+                  <path
+                    key={path.id}
+                    d={path.d}
+                    className={path.id === selectedEdgeId ? 'selected' : ''}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setSelectedEdgeId(path.id)
+                      setSelectedId('')
+                    }}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation()
+                      removeEdge(path.id)
+                    }}
+                  />
                 ))}
+                {linkSourcePoint && linkPoint ? (
+                  <line
+                    className="flow-rubber"
+                    x1={linkSourcePoint.x}
+                    y1={linkSourcePoint.y}
+                    x2={linkPoint.x}
+                    y2={linkPoint.y}
+                  />
+                ) : null}
               </svg>
               {nodes.map((node) => (
                 <FlowCard
@@ -300,7 +433,9 @@ export function FlowEditor({
                   onPointerUp={() => {
                     dragRef.current = null
                   }}
-                  onPort={connectFrom}
+                  onPortDown={onPortPointerDown}
+                  onPortMove={onPortPointerMove}
+                  onPortUp={onPortPointerUp}
                 />
               ))}
             </div>
@@ -349,13 +484,30 @@ export function FlowEditor({
                 />
               ))}
             </div>
-            {linkFrom ? <p className="flow-link-hint">点击下一个节点左侧圆点完成连接</p> : null}
+            {linkFrom ? <p className="flow-link-hint">拖到目标节点的输入圆点（或点击它）完成连线，按 Esc 取消</p> : null}
           </div>
         </section>
 
         <aside className="flow-props">
-          <h2>节点属性</h2>
-          {selected ? (
+          <h2>{selectedEdgeId ? '连线属性' : '节点属性'}</h2>
+          {selectedEdgeId ? (
+            (() => {
+              const edge = edges.find((item) => item.id === selectedEdgeId)
+              const from = nodes.find((node) => node.id === edge?.from)
+              const to = nodes.find((node) => node.id === edge?.to)
+              return (
+                <>
+                  <p>
+                    已选连线：{from?.title ?? '?'} → {to?.title ?? '?'}
+                  </p>
+                  <p className="flow-run-hint">按 Delete 键或双击连线也可以删除。</p>
+                  <button type="button" className="flow-delete" onClick={() => removeEdge(selectedEdgeId)}>
+                    删除连线
+                  </button>
+                </>
+              )
+            })()
+          ) : selected ? (
             <>
               <p>当前节点：{selected.title}</p>
               {selected.type === 'script' ? (
@@ -404,7 +556,7 @@ export function FlowEditor({
               ) : null}
             </>
           ) : (
-            <p>在画布上选择一个节点。</p>
+            <p>在画布上选择一个节点或连线进行配置。</p>
           )}
         </aside>
       </div>
@@ -419,7 +571,9 @@ function FlowCard({
   onPointerDown,
   onPointerMove,
   onPointerUp,
-  onPort,
+  onPortDown,
+  onPortMove,
+  onPortUp,
 }: {
   node: FlowNode
   selected: boolean
@@ -427,13 +581,16 @@ function FlowCard({
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>, node: FlowNode) => void
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void
   onPointerUp: () => void
-  onPort: (event: ReactPointerEvent<HTMLButtonElement>, node: FlowNode, side: 'in' | 'out') => void
+  onPortDown: (event: ReactPointerEvent<HTMLButtonElement>, node: FlowNode, side: 'in' | 'out') => void
+  onPortMove: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onPortUp: (event: ReactPointerEvent<HTMLButtonElement>) => void
 }) {
   const size = nodeSize(node.type)
   return (
     <div
       className={`flow-node ${node.type}${selected ? ' selected' : ''}${linking ? ' linking' : ''}`}
       style={{ left: node.x, top: node.y, width: size.w, height: size.h }}
+      data-node-id={node.id}
       onPointerDown={(event) => {
         event.stopPropagation()
         onPointerDown(event, node)
@@ -442,7 +599,13 @@ function FlowCard({
       onPointerUp={onPointerUp}
     >
       {node.type !== 'start' ? (
-        <button type="button" className="flow-port in" aria-label={`${node.title} 输入`} onPointerDown={(event) => onPort(event, node, 'in')} />
+        <button
+          type="button"
+          className="flow-port in"
+          aria-label={`${node.title} 输入`}
+          data-port-in={node.id}
+          onPointerDown={(event) => onPortDown(event, node, 'in')}
+        />
       ) : null}
       {node.type === 'script' ? (
         <>
@@ -465,7 +628,14 @@ function FlowCard({
         </div>
       )}
       {node.type !== 'end' ? (
-        <button type="button" className="flow-port out" aria-label={`${node.title} 输出`} onPointerDown={(event) => onPort(event, node, 'out')} />
+        <button
+          type="button"
+          className="flow-port out"
+          aria-label={`${node.title} 输出`}
+          onPointerDown={(event) => onPortDown(event, node, 'out')}
+          onPointerMove={onPortMove}
+          onPointerUp={onPortUp}
+        />
       ) : null}
     </div>
   )

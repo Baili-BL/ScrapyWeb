@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { NODE } from '../data.ts'
 import { BotConfig } from '../bots/BotConfig.tsx'
 import { LogList } from '../logs/LogList.tsx'
+import { UserAdmin } from '../users/UserAdmin.tsx'
 import { NodeList } from '../nodes/NodeList.tsx'
 import { EnvList } from '../envs/EnvList.tsx'
 import { ProjectList } from '../projects/ProjectList.tsx'
@@ -99,23 +100,7 @@ export function ModulePage({
   }
 
   if (menuKey === 'users') {
-    return (
-      <DataCard
-        title="用户管理"
-        desc="账号与访问权限"
-        columns={[
-          { title: '用户', dataIndex: 'name' },
-          { title: '账号', dataIndex: 'account' },
-          { title: '角色', dataIndex: 'role' },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            render: (value) => <StatusTag value={String(value)} />,
-          },
-        ]}
-        rows={[{ id: 'demo', name: 'Demo User', account: 'demo', role: 'readonly', status: '在线' }]}
-      />
-    )
+    return <UserAdmin onNotify={onSaved} />
   }
 
   if (menuKey === 'logs') {

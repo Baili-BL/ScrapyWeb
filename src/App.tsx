@@ -3,6 +3,9 @@ import { IconRefresh } from '@arco-design/web-react/icon'
 import zhCN from '@arco-design/web-react/es/locale/zh-CN'
 import { useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
+import { clearAuthToken } from './api.ts'
+import { AuthPage } from './auth/AuthPage.tsx'
+import type { AuthState } from './auth/AuthPage.tsx'
 import { IconApps } from './icons.tsx'
 import { ModulePage } from './layout/ModulePage.tsx'
 import { SideMenu } from './layout/SideMenu.tsx'
@@ -14,11 +17,36 @@ import { SystemOverview } from './panels/SystemOverview.tsx'
 import { TaskMonitor } from './panels/TaskMonitor.tsx'
 import { WorkerNodes } from './panels/WorkerNodes.tsx'
 
+const AUTH_KEY = 'scrapyweb-auth'
+
+function loadAuth(): AuthState | null {
+  try {
+    const raw = localStorage.getItem(AUTH_KEY)
+    return raw ? (JSON.parse(raw) as AuthState) : null
+  } catch {
+    return null
+  }
+}
+
 export default function App() {
+  const [auth, setAuth] = useState<AuthState | null>(() => loadAuth())
   const [tab, setTab] = useState('overview')
   const [tick, setTick] = useState(0)
   const [loading, setLoading] = useState(false)
   const [message, messageHolder] = Message.useMessage()
+
+  const handleAuth = (next: AuthState) => {
+    localStorage.setItem(AUTH_KEY, JSON.stringify(next))
+    setAuth(next)
+    message.success?.(`欢迎，${next.user.displayName}`)
+  }
+
+  const handleLogout = () => {
+    clearAuthToken()
+    localStorage.removeItem(AUTH_KEY)
+    setAuth(null)
+    message.info?.('已退出登录')
+  }
 
   const refresh = () => {
     if (loading) return
@@ -30,11 +58,20 @@ export default function App() {
     }, 600)
   }
 
+  if (!auth) {
+    return (
+      <ConfigProvider locale={zhCN}>
+        {messageHolder}
+        <AuthPage onAuth={handleAuth} />
+      </ConfigProvider>
+    )
+  }
+
   return (
     <ConfigProvider locale={zhCN}>
       {messageHolder}
       <div className="app-shell">
-        <SideMenu onLogout={() => message.info?.('当前是只读演示账号')} />
+        <SideMenu user={auth.user} onLogout={handleLogout} />
         <div className="workspace">
           <Routes>
             {(Object.entries(MENU_PATHS) as [MenuKey, string][]).map(([key, path]) => (

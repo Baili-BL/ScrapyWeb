@@ -4,6 +4,7 @@
  * 真实逻辑：读取爬虫产出、真实运行 scrapy、真实系统指标、任务持久化。
  */
 import { spawn } from 'node:child_process'
+import crypto from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
@@ -23,6 +24,8 @@ const SCRAPY = path.join(ROOT, '.venv', 'Scripts', 'scrapy.exe')
 const TASKS_FILE = path.join(DATA, 'tasks.json')
 const RUNS_FILE = path.join(DATA, 'runs.json')
 const BOTS_FILE = path.join(DATA, 'bots.json')
+const USERS_FILE = path.join(DATA, 'users.json')
+const AUTH_SECRET_FILE = path.join(DATA, '.auth-secret')
 
 type BotType = 'wecom' | 'feishu'
 
@@ -704,6 +707,114 @@ async function buildOutputs() {
   return outputs.sort((a, b) => b.mtime.localeCompare(a.mtime))
 }
 
+/* ------------------------- 认证与用户管理 ------------------------- */
+
+type UserRole = 'admin' | 'operator' | 'readonly'
+
+type UserRecord = {
+  id: string
+  username: string
+  displayName: string
+  role: UserRole
+  status: 'active' | 'disabled'
+  salt: string
+  passwordHash: string
+  createdAt: string
+  lastLoginAt: string | null
+}
+
+const USERNAME_RE = /^[a-zA-Z0-9_]{3,32}$/
+
+function hashPassword(password: string, salt: string): string {
+  return crypto.scryptSync(password, salt, 32).toString('hex')
+}
+
+function publicUser(user: UserRecord) {
+  const { salt, passwordHash, ...rest } = user
+  return rest
+}
+
+function loadUsers(): UserRecord[] {
+  ensureDataDir()
+  if (!existsSync(USERS_FILE)) {
+    const salt = crypto.randomBytes(8).toString('hex')
+    const seeded: UserRecord[] = [
+      {
+        id: 'user-admin',
+        username: 'admin',
+        displayName: '管理员',
+        role: 'admin',
+        status: 'active',
+        salt,
+        passwordHash: hashPassword('admin123', salt),
+        createdAt: new Date().toISOString(),
+        lastLoginAt: null,
+      },
+    ]
+    saveJson(USERS_FILE, seeded)
+    return seeded
+  }
+  return loadJson<UserRecord[]>(USERS_FILE, [])
+}
+
+function saveUsers(users: UserRecord[]): void {
+  saveJson(USERS_FILE, users)
+}
+
+function authSecret(): string {
+  ensureDataDir()
+  if (!existsSync(AUTH_SECRET_FILE)) {
+    const secret = crypto.randomBytes(32).toString('hex')
+    writeFileSync(AUTH_SECRET_FILE, secret, 'utf-8')
+    return secret
+  }
+  return readFileSync(AUTH_SECRET_FILE, 'utf-8').trim()
+}
+
+function signToken(userId: string): string {
+  const exp = Date.now() + 7 * 24 * 3600 * 1000
+  const payload = `${userId}.${exp}`
+  const signature = crypto.createHmac('sha256', authSecret()).update(payload).digest('hex')
+  return `${payload}.${signature}`
+}
+
+function verifyToken(token: string): string | null {
+  const parts = token.split('.')
+  if (parts.length !== 3) return null
+  const [userId, exp, signature] = parts
+  if (!userId || !exp || !signature) return null
+  if (Number(exp) < Date.now()) return null
+  const expected = crypto.createHmac('sha256', authSecret()).update(`${userId}.${exp}`).digest('hex')
+  const a = Buffer.from(signature)
+  const b = Buffer.from(expected)
+  return a.length === b.length && crypto.timingSafeEqual(a, b) ? userId : null
+}
+
+function activeAdminCount(users: UserRecord[]): number {
+  return users.filter((user) => user.role === 'admin' && user.status === 'active').length
+}
+
+function createUserRecord(username: string, password: string, displayName: string, role: UserRole): UserRecord {
+  const salt = crypto.randomBytes(8).toString('hex')
+  return {
+    id: `user-${crypto.randomBytes(6).toString('hex')}`,
+    username,
+    displayName: displayName || username,
+    role,
+    status: 'active',
+    salt,
+    passwordHash: hashPassword(password, salt),
+    createdAt: new Date().toISOString(),
+    lastLoginAt: null,
+  }
+}
+
+function validateNewUser(username: string, password: string): string | null {
+  if (!USERNAME_RE.test(username)) return '用户名需 3-32 位，仅限字母/数字/下划线'
+  if (password.length < 6) return '密码至少 6 位'
+  return null
+}
+
 /* ------------------------- HTTP 工具 ------------------------- */
 
 function sendJson(res: import('node:http').ServerResponse, status: number, payload: unknown): void {
@@ -819,6 +930,209 @@ async function buildOverview() {
 
 async function handleApi(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, pathname: string): Promise<boolean> {
   const method = (req.method ?? 'GET').toUpperCase()
+
+  /* ------------------------- 认证（公开路由） ------------------------- */
+
+  if (pathname === '/api/auth/register' && method === 'POST') {
+    const body = await readBody(req)
+    const username = String(body.username ?? '').trim()
+    const password = String(body.password ?? '')
+    const displayName = String(body.displayName ?? '').trim()
+    const invalid = validateNewUser(username, password)
+    if (invalid) {
+      sendJson(res, 400, { error: invalid })
+      return true
+    }
+    const users = loadUsers()
+    if (users.some((user) => user.username === username)) {
+      sendJson(res, 400, { error: '用户名已存在' })
+      return true
+    }
+    const user = createUserRecord(username, password, displayName, 'readonly')
+    users.push(user)
+    saveUsers(users)
+    sendJson(res, 200, publicUser(user))
+    return true
+  }
+
+  if (pathname === '/api/auth/login' && method === 'POST') {
+    const body = await readBody(req)
+    const username = String(body.username ?? '').trim()
+    const password = String(body.password ?? '')
+    const user = loadUsers().find((item) => item.username === username)
+    if (!user || user.passwordHash !== hashPassword(password, user.salt)) {
+      sendJson(res, 401, { error: '用户名或密码错误' })
+      return true
+    }
+    if (user.status !== 'active') {
+      sendJson(res, 403, { error: '该账号已被停用，请联系管理员' })
+      return true
+    }
+    user.lastLoginAt = new Date().toISOString()
+    saveUsers(loadUsers().map((item) => (item.id === user.id ? user : item)))
+    sendJson(res, 200, { token: signToken(user.id), user: publicUser(user) })
+    return true
+  }
+
+  if (pathname === '/api/auth/me' && method === 'GET') {
+    const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+    const userId = verifyToken(token)
+    const user = userId ? loadUsers().find((item) => item.id === userId) : undefined
+    if (!user || user.status !== 'active') {
+      sendJson(res, 401, { error: '未登录或登录已过期' })
+      return true
+    }
+    sendJson(res, 200, publicUser(user))
+    return true
+  }
+
+  if (pathname === '/api/health' && method === 'GET') {
+    sendJson(res, 200, { ok: true, ts: new Date().toISOString() })
+    return true
+  }
+
+  /* ------------------------- 登录守卫 ------------------------- */
+
+  const authUserId = verifyToken((req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''))
+  if (!authUserId) {
+    sendJson(res, 401, { error: '未登录或登录已过期' })
+    return true
+  }
+  const authUser = loadUsers().find((item) => item.id === authUserId)
+  if (!authUser || authUser.status !== 'active') {
+    sendJson(res, 401, { error: '账号不存在或已停用' })
+    return true
+  }
+  if (method !== 'GET' && authUser.role === 'readonly') {
+    sendJson(res, 403, { error: '只读账号无权执行写操作' })
+    return true
+  }
+
+  /* ------------------------- 用户管理（仅管理员） ------------------------- */
+
+  if (pathname === '/api/users' || pathname.startsWith('/api/users/')) {
+    if (authUser.role !== 'admin') {
+      sendJson(res, 403, { error: '仅管理员可管理用户' })
+      return true
+    }
+    if (pathname === '/api/users' && method === 'GET') {
+      sendJson(res, 200, loadUsers().map(publicUser))
+      return true
+    }
+    if (pathname === '/api/users' && method === 'POST') {
+      const body = await readBody(req)
+      const username = String(body.username ?? '').trim()
+      const password = String(body.password ?? '')
+      const displayName = String(body.displayName ?? '').trim()
+      const role = String(body.role ?? 'readonly') as UserRole
+      const invalid = validateNewUser(username, password)
+      if (invalid) {
+        sendJson(res, 400, { error: invalid })
+        return true
+      }
+      if (!['admin', 'operator', 'readonly'].includes(role)) {
+        sendJson(res, 400, { error: '角色仅支持 admin / operator / readonly' })
+        return true
+      }
+      const users = loadUsers()
+      if (users.some((item) => item.username === username)) {
+        sendJson(res, 400, { error: '用户名已存在' })
+        return true
+      }
+      const user = createUserRecord(username, password, displayName, role)
+      users.push(user)
+      saveUsers(users)
+      sendJson(res, 200, publicUser(user))
+      return true
+    }
+    if (pathname === '/api/users/import' && method === 'POST') {
+      const body = await readBody(req)
+      const rows = Array.isArray(body.rows) ? (body.rows as Array<Record<string, unknown>>) : []
+      if (!rows.length) {
+        sendJson(res, 400, { error: '导入内容为空' })
+        return true
+      }
+      if (rows.length > 500) {
+        sendJson(res, 400, { error: '单次最多导入 500 行' })
+        return true
+      }
+      const users = loadUsers()
+      const skipped: Array<{ username: string; reason: string }> = []
+      let created = 0
+      for (const row of rows) {
+        const username = String(row.username ?? '').trim()
+        const password = String(row.password ?? '')
+        const displayName = String(row.displayName ?? '').trim()
+        const roleRaw = String(row.role ?? 'readonly') as UserRole
+        const role = ['admin', 'operator', 'readonly'].includes(roleRaw) ? roleRaw : 'readonly'
+        const invalid = validateNewUser(username, password)
+        if (invalid) {
+          skipped.push({ username: username || '(空)', reason: invalid })
+          continue
+        }
+        if (users.some((item) => item.username === username)) {
+          skipped.push({ username, reason: '用户名已存在' })
+          continue
+        }
+        users.push(createUserRecord(username, password, displayName, role))
+        created += 1
+      }
+      saveUsers(users)
+      sendJson(res, 200, { created, skipped })
+      return true
+    }
+    const userMatch = /^\/api\/users\/([^/]+)$/.exec(pathname)
+    if (userMatch) {
+      const id = decodeURIComponent(userMatch[1])
+      const users = loadUsers()
+      const index = users.findIndex((item) => item.id === id)
+      if (index === -1) {
+        sendJson(res, 404, { error: '用户不存在' })
+        return true
+      }
+      const target = users[index]
+      if (method === 'PUT') {
+        const body = await readBody(req)
+        if (typeof body.password === 'string' && body.password) {
+          if (body.password.length < 6) {
+            sendJson(res, 400, { error: '密码至少 6 位' })
+            return true
+          }
+          target.salt = crypto.randomBytes(8).toString('hex')
+          target.passwordHash = hashPassword(body.password, target.salt)
+        }
+        if (typeof body.displayName === 'string' && body.displayName.trim()) target.displayName = body.displayName.trim()
+        if (body.role === 'admin' || body.role === 'operator' || body.role === 'readonly') target.role = body.role
+        if (body.status === 'active' || body.status === 'disabled') target.status = body.status
+        if (authUser.id === target.id && (target.status !== 'active' || target.role !== 'admin')) {
+          sendJson(res, 400, { error: '不能停用或降级当前登录的管理员自己' })
+          return true
+        }
+        if ((target.role !== 'admin' || target.status !== 'active') && activeAdminCount(users) === 0) {
+          sendJson(res, 400, { error: '系统至少需要保留一个启用的管理员' })
+          return true
+        }
+        saveUsers(users)
+        sendJson(res, 200, publicUser(target))
+        return true
+      }
+      if (method === 'DELETE') {
+        if (target.id === authUser.id) {
+          sendJson(res, 400, { error: '不能删除当前登录的账号' })
+          return true
+        }
+        if (target.role === 'admin' && target.status === 'active' && activeAdminCount(users) === 1) {
+          sendJson(res, 400, { error: '系统至少需要保留一个启用的管理员' })
+          return true
+        }
+        users.splice(index, 1)
+        saveUsers(users)
+        sendJson(res, 200, publicUser(target))
+        return true
+      }
+    }
+    return true
+  }
 
   if (pathname === '/api/overview' && method === 'GET') {
     sendJson(res, 200, await buildOverview())

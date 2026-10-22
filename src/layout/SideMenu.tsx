@@ -19,6 +19,8 @@ import {
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { ROLE_LABEL } from '../api.ts'
+import type { AuthUser } from '../api.ts'
 import { MENU_GROUPS, menuKeyFromPath, menuPath } from './menu.ts'
 import type { MenuEntry, MenuKey } from './menu.ts'
 
@@ -56,13 +58,14 @@ const ICONS: Record<string, ReactNode> = {
   settings: <IconSettings />,
 }
 
-export function SideMenu({ onLogout }: { onLogout: () => void }) {
+export function SideMenu({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const activeKey = menuKeyFromPath(pathname) ?? ''
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const settingsActive = activeKey === 'settings-basic' || activeKey === 'settings-alert'
+  const initials = (user.displayName || user.username).slice(0, 2)
 
   useEffect(() => {
     if (settingsActive) setSettingsOpen(true)
@@ -185,11 +188,11 @@ export function SideMenu({ onLogout }: { onLogout: () => void }) {
           </Menu>
         }
       >
-        <button type="button" className="sider-user" aria-label="Demo User 账号菜单">
-          <span className="avatar">DE</span>
+        <button type="button" className="sider-user" aria-label={`${user.displayName} 账号菜单`}>
+          <span className="avatar">{initials}</span>
           <span className="user-meta">
-            <strong>Demo User</strong>
-            <span>readonly</span>
+            <strong>{user.displayName}</strong>
+            <span>{ROLE_LABEL[user.role]}</span>
           </span>
           <span className="user-side">
             <i className="status-dot" />

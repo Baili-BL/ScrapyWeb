@@ -252,6 +252,73 @@ export async function pollFlowRun(runId: string, timeoutMs = 900000, intervalMs 
   throw new Error('等待流程运行结束超时')
 }
 
+/* ------------------------- 认证与用户 ------------------------- */
+
+export type UserRole = 'admin' | 'operator' | 'readonly'
+
+export type AuthUser = {
+  id: string
+  username: string
+  displayName: string
+  role: UserRole
+  status: 'active' | 'disabled'
+  createdAt: string
+  lastLoginAt: string | null
+}
+
+export type LoginResult = { token: string; user: AuthUser }
+
+export const ROLE_LABEL: Record<UserRole, string> = {
+  admin: '管理员',
+  operator: '操作员',
+  readonly: '只读',
+}
+
+export function login(username: string, password: string): Promise<LoginResult> {
+  return request<LoginResult>('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
+}
+
+export function register(payload: { username: string; password: string; displayName: string }): Promise<AuthUser> {
+  return request<AuthUser>('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function fetchMe(): Promise<AuthUser> {
+  return request<AuthUser>('/api/auth/me')
+}
+
+export function fetchUsers(): Promise<AuthUser[]> {
+  return request<AuthUser[]>('/api/users')
+}
+
+export function adminCreateUser(payload: {
+  username: string
+  password: string
+  displayName: string
+  role: UserRole
+}): Promise<AuthUser> {
+  return request<AuthUser>('/api/users', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function importUsers(
+  rows: Array<{ username: string; password: string; displayName?: string; role?: UserRole }>,
+): Promise<{ created: number; skipped: Array<{ username: string; reason: string }> }> {
+  return request<{ created: number; skipped: Array<{ username: string; reason: string }> }>('/api/users/import', {
+    method: 'POST',
+    body: JSON.stringify({ rows }),
+  })
+}
+
+export function adminUpdateUser(
+  id: string,
+  patch: { displayName?: string; role?: UserRole; status?: 'active' | 'disabled'; password?: string },
+): Promise<AuthUser> {
+  return request<AuthUser>(`/api/users/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) })
+}
+
+export function adminDeleteUser(id: string): Promise<AuthUser> {
+  return request<AuthUser>(`/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 export type TaskDraftPayload = {
   name: string
   description: string
@@ -265,10 +332,25 @@ export type TaskDraftPayload = {
   tags: string[]
 }
 
+const TOKEN_KEY = 'scrapyweb-auth-token'
+
+export function getAuthToken(): string {
+  return localStorage.getItem(TOKEN_KEY) ?? ''
+}
+
+export function clearAuthToken(): void {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const token = getAuthToken()
   const response = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers ?? {}),
+    },
   })
   const text = await response.text()
   let payload: unknown = null
@@ -278,6 +360,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     payload = null
   }
   if (!response.ok) {
+    // 非 认证接口 遇到 401：本地凭证失效，回到登录页
+    if (response.status === 401 && !url.startsWith('/api/auth/')) {
+      clearAuthToken()
+      if (typeof window !== 'undefined') window.location.reload()
+    }
     const message = (payload as { error?: string } | null)?.error ?? `请求失败（${response.status}）`
     throw new Error(message)
   }
