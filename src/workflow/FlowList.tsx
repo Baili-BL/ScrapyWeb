@@ -133,7 +133,7 @@ export function FlowList({ onNotify }: { onNotify: (text: string) => void }) {
             return (
               <div key={flow.id} className="flow-card" role="button" tabIndex={0} onClick={() => setEditing(flow)}>
                 <strong>{flow.name}</strong>
-                <span>{flow.description || '把脚本节点连接成流程，运行时按顺序真实执行。'}</span>
+                <span className="flow-desc">{flow.description || '把脚本节点连接成流程，运行时按顺序真实执行。'}</span>
                 <span className="flow-steps">执行顺序：{steps.length ? steps.join(' → ') : '（尚无脚本节点）'}</span>
                 <span className="flow-lastrun">
                   最近运行：{lastRun ? `${fmtTime(lastRun.finishedAt ?? lastRun.startedAt)} · ${lastRun.status === 'success' ? '成功' : '失败'} · ${lastRun.durationSec ?? '—'}s` : '从未运行'}
