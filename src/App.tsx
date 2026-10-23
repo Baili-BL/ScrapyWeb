@@ -49,7 +49,7 @@ export default function App() {
 
   if (!auth) {
     return (
-      <ConfigProvider locale={zhCN}>
+      <ConfigProvider locale={zhCN} getPopupContainer={() => document.body}>
         {messageHolder}
         <AuthPage onAuth={handleAuth} />
       </ConfigProvider>
@@ -57,7 +57,7 @@ export default function App() {
   }
 
   return (
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider locale={zhCN} getPopupContainer={() => document.body}>
       {messageHolder}
       <ErrorBoundary>
         <div className="app-shell">
