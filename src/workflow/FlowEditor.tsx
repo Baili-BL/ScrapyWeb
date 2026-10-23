@@ -178,7 +178,7 @@ export function FlowEditor({
     onNotify('已删除连线')
   }
 
-  /** 输出端口按下：进入连线模式（支持拖拽到目标端口，也支持点选）。 */
+  /** 输出端口按下：进入连线模式。支持两种方式——按住拖到目标节点，或点输出圆点后再点目标节点。 */
   const onPortPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, node: FlowNode, side: 'in' | 'out') => {
     event.stopPropagation()
     setSelectedId(node.id)
@@ -186,7 +186,6 @@ export function FlowEditor({
     if (side === 'out') {
       setLinkFrom(node.id)
       setLinkPoint(stageCoords(event.clientX, event.clientY))
-      event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
     if (linkFrom && linkFrom !== node.id) {
@@ -197,24 +196,40 @@ export function FlowEditor({
     setLinkPoint(null)
   }
 
-  const onPortPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  /* 连线进行中：在 window 上监听移动/松开（不用指针捕获，
+     否则目标节点的输入圆点收不到事件，点选与拖拽都会失灵） */
+  useEffect(() => {
     if (!linkFrom) return
-    setLinkPoint(stageCoords(event.clientX, event.clientY))
-  }
-
-  const onPortPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!linkFrom) return
-    const target = document.elementFromPoint(event.clientX, event.clientY)
-    const portEl = target?.closest('[data-port-in]')
-    const nodeEl = target?.closest('[data-node-id]')
-    const targetId = portEl?.getAttribute('data-port-in') ?? nodeEl?.getAttribute('data-node-id')
-    if (targetId && targetId !== linkFrom) {
-      addEdge(linkFrom, targetId)
-      onNotify('已连线')
+    const onMove = (event: PointerEvent) => {
+      setLinkPoint(stageCoords(event.clientX, event.clientY))
     }
-    setLinkFrom(null)
-    setLinkPoint(null)
-  }
+    const onUp = (event: PointerEvent) => {
+      const target = document.elementFromPoint(event.clientX, event.clientY)
+      const portEl = target?.closest('[data-port-in]')
+      const nodeEl = target?.closest('[data-node-id]')
+      const targetId = portEl?.getAttribute('data-port-in') ?? nodeEl?.getAttribute('data-node-id')
+      if (targetId && targetId !== linkFrom) {
+        addEdge(linkFrom, targetId)
+        onNotify('已连线')
+      }
+      setLinkFrom(null)
+      setLinkPoint(null)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setLinkFrom(null)
+        setLinkPoint(null)
+      }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('keydown', onKey)
+    }
+  })
 
   const handleSave = async () => {
     setSaveBusy(true)
@@ -434,8 +449,6 @@ export function FlowEditor({
                     dragRef.current = null
                   }}
                   onPortDown={onPortPointerDown}
-                  onPortMove={onPortPointerMove}
-                  onPortUp={onPortPointerUp}
                 />
               ))}
             </div>
@@ -484,7 +497,7 @@ export function FlowEditor({
                 />
               ))}
             </div>
-            {linkFrom ? <p className="flow-link-hint">拖到目标节点的输入圆点（或点击它）完成连线，按 Esc 取消</p> : null}
+            {linkFrom ? <p className="flow-link-hint">按住拖到目标节点的输入圆点松手，或点击目标节点的输入圆点完成连线（Esc 取消）</p> : null}
           </div>
         </section>
 
@@ -572,8 +585,6 @@ function FlowCard({
   onPointerMove,
   onPointerUp,
   onPortDown,
-  onPortMove,
-  onPortUp,
 }: {
   node: FlowNode
   selected: boolean
@@ -582,8 +593,6 @@ function FlowCard({
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void
   onPointerUp: () => void
   onPortDown: (event: ReactPointerEvent<HTMLButtonElement>, node: FlowNode, side: 'in' | 'out') => void
-  onPortMove: (event: ReactPointerEvent<HTMLButtonElement>) => void
-  onPortUp: (event: ReactPointerEvent<HTMLButtonElement>) => void
 }) {
   const size = nodeSize(node.type)
   return (
@@ -633,8 +642,6 @@ function FlowCard({
           className="flow-port out"
           aria-label={`${node.title} 输出`}
           onPointerDown={(event) => onPortDown(event, node, 'out')}
-          onPointerMove={onPortMove}
-          onPointerUp={onPortUp}
         />
       ) : null}
     </div>

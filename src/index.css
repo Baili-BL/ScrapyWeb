@@ -3042,10 +3042,20 @@ span.project-file {
   stroke-width: 2.5;
 }
 
+/* 拖拽橡皮筋/提示/小地图不拦截命中测试，否则松手时落点判定会打到它们身上 */
 .flow-rubber {
   stroke: #165dff;
   stroke-width: 2;
   stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+.flow-link-hint {
+  pointer-events: none;
+}
+
+.flow-minimap {
+  pointer-events: none;
 }
 
 .flow-port::after {
