@@ -529,8 +529,11 @@ export type TaskDraftPayload = {
 }
 
 const TOKEN_KEY = 'scrapyweb-auth-token'
+const AUTH_STORAGE_KEY = 'scrapyweb-auth'
 
 export const AUTH_TOKEN_KEY = TOKEN_KEY
+
+export type AuthSession = { token: string; user: AuthUser }
 
 export function getAuthToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? ''
@@ -540,8 +543,33 @@ export function setAuthToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token)
 }
 
-export function clearAuthToken(): void {
+/** 登录态整体存取：登录对象与 token 必须成对写入/清除。 */
+export function storeAuthSession(session: AuthSession): void {
+  localStorage.setItem(TOKEN_KEY, session.token)
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session))
+}
+
+export function loadAuthSession(): AuthSession | null {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY)
+    if (!raw) return null
+    const session = JSON.parse(raw) as AuthSession
+    if (!session?.token || !session?.user) return null
+    localStorage.setItem(TOKEN_KEY, session.token)
+    return session
+  } catch {
+    return null
+  }
+}
+
+/** 完整清除登录态（两个键都要清，否则会形成 401 刷新循环白屏）。 */
+export function clearAuthSession(): void {
   localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+}
+
+export function clearAuthToken(): void {
+  clearAuthSession()
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -562,10 +590,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     payload = null
   }
   if (!response.ok) {
-    // 非 认证接口 遇到 401：本地凭证失效，回到登录页
+    // 非 认证接口 遇到 401：登录态已失效，两个键一起清掉再回登录页，
+    // 否则残留的登录对象会让应用反复以失效凭证请求，形成刷新循环（白屏）。
     if (response.status === 401 && !url.startsWith('/api/auth/')) {
-      clearAuthToken()
-      if (typeof window !== 'undefined') window.location.reload()
+      clearAuthSession()
+      if (typeof window !== 'undefined') window.location.replace('/')
     }
     const message = (payload as { error?: string } | null)?.error ?? `请求失败（${response.status}）`
     throw new Error(message)

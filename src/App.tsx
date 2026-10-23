@@ -3,9 +3,9 @@ import { IconRefresh } from '@arco-design/web-react/icon'
 import zhCN from '@arco-design/web-react/es/locale/zh-CN'
 import { useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { clearAuthToken, setAuthToken } from './api.ts'
+import { clearAuthSession, loadAuthSession, storeAuthSession } from './api.ts'
 import { AuthPage } from './auth/AuthPage.tsx'
-import type { AuthState } from './auth/AuthPage.tsx'
+import { ErrorBoundary } from './ErrorBoundary.tsx'
 import { SpiderIcon } from './icons.tsx'
 import { ModulePage } from './layout/ModulePage.tsx'
 import { SideMenu } from './layout/SideMenu.tsx'
@@ -16,39 +16,23 @@ import { PerformancePanel } from './panels/PerformancePanel.tsx'
 import { SystemOverview } from './panels/SystemOverview.tsx'
 import { TaskMonitor } from './panels/TaskMonitor.tsx'
 import { WorkerNodes } from './panels/WorkerNodes.tsx'
-
-const AUTH_KEY = 'scrapyweb-auth'
-
-function loadAuth(): AuthState | null {
-  try {
-    const raw = localStorage.getItem(AUTH_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as AuthState
-    // 兼容修复：把 token 同步给 API 客户端使用的键
-    if (parsed?.token) setAuthToken(parsed.token)
-    return parsed
-  } catch {
-    return null
-  }
-}
+import type { AuthSession } from './api.ts'
 
 export default function App() {
-  const [auth, setAuth] = useState<AuthState | null>(() => loadAuth())
+  const [auth, setAuth] = useState<AuthSession | null>(() => loadAuthSession())
   const [tab, setTab] = useState('overview')
   const [tick, setTick] = useState(0)
   const [loading, setLoading] = useState(false)
   const [message, messageHolder] = Message.useMessage()
 
-  const handleAuth = (next: AuthState) => {
-    localStorage.setItem(AUTH_KEY, JSON.stringify(next))
-    setAuthToken(next.token)
+  const handleAuth = (next: AuthSession) => {
+    storeAuthSession(next)
     setAuth(next)
     message.success?.(`欢迎，${next.user.displayName}`)
   }
 
   const handleLogout = () => {
-    clearAuthToken()
-    localStorage.removeItem(AUTH_KEY)
+    clearAuthSession()
     setAuth(null)
     message.info?.('已退出登录')
   }
@@ -75,27 +59,29 @@ export default function App() {
   return (
     <ConfigProvider locale={zhCN}>
       {messageHolder}
-      <div className="app-shell">
-        <SideMenu user={auth.user} onLogout={handleLogout} />
-        <div className="workspace">
-          <Routes>
-            {(Object.entries(MENU_PATHS) as [MenuKey, string][]).map(([key, path]) => (
-              <Route
-                key={key}
-                path={path}
-                element={
-                  key === 'dashboard' ? (
-                    <Dashboard tick={tick} loading={loading} onRefresh={refresh} tab={tab} onTab={setTab} />
-                  ) : (
-                    <ModulePage menuKey={key} onSaved={(text) => message.success?.(text)} />
-                  )
-                }
-              />
-            ))}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+      <ErrorBoundary>
+        <div className="app-shell">
+          <SideMenu user={auth.user} onLogout={handleLogout} />
+          <div className="workspace">
+            <Routes>
+              {(Object.entries(MENU_PATHS) as [MenuKey, string][]).map(([key, path]) => (
+                <Route
+                  key={key}
+                  path={path}
+                  element={
+                    key === 'dashboard' ? (
+                      <Dashboard tick={tick} loading={loading} onRefresh={refresh} tab={tab} onTab={setTab} />
+                    ) : (
+                      <ModulePage menuKey={key} onSaved={(text) => message.success?.(text)} />
+                    )
+                  }
+                />
+              ))}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </div>
         </div>
-      </div>
+      </ErrorBoundary>
     </ConfigProvider>
   )
 }

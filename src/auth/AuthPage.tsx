@@ -1,13 +1,11 @@
 import { Button, Form, Input, Tabs } from '@arco-design/web-react'
 import { useState } from 'react'
-import type { AuthUser } from '../api.ts'
+import type { AuthSession } from '../api.ts'
 import { login, register } from '../api.ts'
 import { SpiderIcon } from '../icons.tsx'
 
-export type AuthState = { token: string; user: AuthUser }
-
 /** 未登录时的全屏页面：登录 / 注册。 */
-export function AuthPage({ onAuth }: { onAuth: (auth: AuthState) => void }) {
+export function AuthPage({ onAuth }: { onAuth: (auth: AuthSession) => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [form, setForm] = useState({ username: '', password: '', displayName: '', confirm: '' })
   const [error, setError] = useState('')
