@@ -28,17 +28,23 @@ export type MenuGroup = {
 
 export const MENU_GROUPS: MenuGroup[] = [
   {
-    title: '通用',
+    title: '总览',
+    items: [{ key: 'dashboard', label: '仪表盘' }],
+  },
+  {
+    title: '任务调度',
     items: [
-      { key: 'dashboard', label: '仪表盘' },
       { key: 'tasks', label: '任务管理' },
       { key: 'workflow', label: '流程编排' },
       { key: 'projects', label: '项目管理' },
+    ],
+  },
+  {
+    title: '资源与环境',
+    items: [
       { key: 'envs', label: '环境管理' },
       { key: 'python', label: 'Python版本' },
       { key: 'nodes', label: '分布式节点' },
-      { key: 'users', label: '用户管理' },
-      { key: 'logs', label: '系统日志' },
     ],
   },
   {
@@ -50,8 +56,10 @@ export const MENU_GROUPS: MenuGroup[] = [
     ],
   },
   {
-    title: '其他',
+    title: '系统',
     items: [
+      { key: 'users', label: '用户管理' },
+      { key: 'logs', label: '系统日志' },
       { key: 'docs', label: '技术文档' },
       {
         key: 'settings',

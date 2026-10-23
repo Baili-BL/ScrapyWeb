@@ -26,9 +26,11 @@ import { MENU_GROUPS, menuKeyFromPath, menuPath } from './menu.ts'
 import type { MenuEntry, MenuKey } from './menu.ts'
 
 const GROUP_SHORT: Record<string, string> = {
-  通用: '通用',
+  总览: '总览',
+  任务调度: '调度',
+  资源与环境: '资源',
   AI助手: 'AI',
-  其他: '其他',
+  系统: '系统',
 }
 
 function FoldIcon() {
