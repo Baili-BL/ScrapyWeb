@@ -1,4 +1,4 @@
-import { Input, Select } from '@arco-design/web-react'
+import { Input } from '@arco-design/web-react'
 import {
   IconCode,
   IconLeft,
@@ -211,7 +211,16 @@ export function FlowEditor({
       if (targetId && targetId !== linkFrom) {
         addEdge(linkFrom, targetId)
         onNotify('已连线')
+        setLinkFrom(null)
+        setLinkPoint(null)
+        return
       }
+      if (targetId === linkFrom) {
+        // 松手在源端口上：点选连线模式的第一步，保持连线状态等待点击目标
+        setLinkPoint(stageCoords(event.clientX, event.clientY))
+        return
+      }
+      // 拖到空白处松手 → 取消
       setLinkFrom(null)
       setLinkPoint(null)
     }
@@ -527,21 +536,30 @@ export function FlowEditor({
                 <>
                   <label>
                     <span>项目（爬虫）</span>
-                    <Select
-                      placeholder="请选择爬虫"
-                      value={selected.project || undefined}
-                      options={SPIDER_OPTIONS}
-                      onChange={(value) => {
-                        const project = value ? String(value) : ''
-                        const meta = project ? SPIDER_META[project] : undefined
-                        updateNode(selected.id, {
-                          project,
-                          env: meta?.env ?? '',
-                          command: meta?.command ?? '',
-                          title: meta ? meta.title : selected.title,
-                        })
-                      }}
-                    />
+                    <div className="spider-choice">
+                      {SPIDER_OPTIONS.map((option) => {
+                        const meta = SPIDER_META[option.value]
+                        const active = selected.project === option.value
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={active ? 'spider-choice-btn on' : 'spider-choice-btn'}
+                            onClick={() => {
+                              updateNode(selected.id, {
+                                project: option.value,
+                                env: meta?.env ?? '',
+                                command: meta?.command ?? '',
+                                title: meta ? meta.title : selected.title,
+                              })
+                            }}
+                          >
+                            <strong>{meta?.title ?? option.value}</strong>
+                            <em>{option.value}</em>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </label>
                   <label>
                     <span>节点标题（随爬虫自动生成）</span>
